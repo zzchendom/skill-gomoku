@@ -642,7 +642,7 @@ function applyBlock(row, col) {
   state.skill.blockedCells.push({ row, col, blockedFor });
   pushLog(`${PLAYER_LABELS[state.match.currentPlayer]} 对 (${row + 1}, ${col + 1}) 施加了封锁。`);
   setMessage(`封锁已生效：${PLAYER_LABELS[blockedFor]} 下一手不能落在该位置。`);
-  queueEffect([[row, col]], "burst");
+  queueEffect([[row, col]], "lock", 950);
   return true;
 }
 
@@ -706,7 +706,7 @@ function applyBlast(row, col) {
     `${PLAYER_LABELS[state.match.currentPlayer]} 在 (${row + 1}, ${col + 1}) 引爆十字区域，清除了 ${removed.length} 枚敌子。`
   );
   setMessage("爆破生效，战场结构被重新撕开。");
-  queueEffect(removed, "burst", 800);
+  queueEffect(removed, "blast", 950);
   return true;
 }
 
