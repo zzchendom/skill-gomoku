@@ -463,8 +463,6 @@ function renderBoard() {
       }
 
       button.addEventListener("click", () => handleBoardClick(row, col));
-      button.addEventListener("mouseenter", () => handleCellHover(row, col));
-      button.addEventListener("mouseleave", clearHoverCell);
       fragment.appendChild(button);
     }
   }
@@ -790,7 +788,7 @@ function handleCellHover(row, col) {
 
   if (state.skill.selectedSkill) {
     state.ui.hoverCell = { row, col };
-    renderBoard();
+    updateBoardHoverState();
     return;
   }
 
@@ -800,7 +798,7 @@ function handleCellHover(row, col) {
   }
 
   state.ui.hoverCell = { row, col };
-  renderBoard();
+  updateBoardHoverState();
 }
 
 function clearHoverCell() {
@@ -809,7 +807,24 @@ function clearHoverCell() {
   }
 
   state.ui.hoverCell = null;
-  renderBoard();
+  updateBoardHoverState();
+}
+
+function updateBoardHoverState() {
+  const cells = dom.board.querySelectorAll(".cell");
+
+  cells.forEach((cell) => cell.classList.remove("hovered"));
+
+  if (!state.ui.hoverCell) {
+    return;
+  }
+
+  const selector = `.cell[data-row="${state.ui.hoverCell.row}"][data-col="${state.ui.hoverCell.col}"]`;
+  const hoveredCell = dom.board.querySelector(selector);
+
+  if (hoveredCell) {
+    hoveredCell.classList.add("hovered");
+  }
 }
 
 function resetGame() {
@@ -849,6 +864,16 @@ function bindEvents() {
   dom.modalNewGame.addEventListener("click", resetGame);
   dom.undoMove.addEventListener("click", undoMove);
   dom.skipSkill.addEventListener("click", skipSkill);
+  dom.board.addEventListener("mouseover", (event) => {
+    const cell = event.target.closest(".cell");
+
+    if (!cell || !dom.board.contains(cell)) {
+      return;
+    }
+
+    handleCellHover(Number(cell.dataset.row), Number(cell.dataset.col));
+  });
+  dom.board.addEventListener("mouseleave", clearHoverCell);
 }
 
 bindEvents();
