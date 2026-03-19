@@ -98,7 +98,8 @@ function createInitialState() {
       logs: [
         "欢迎来到技能五子棋：五连获胜，3 连触发小技能，4 连触发大技能。"
       ],
-      effects: []
+      effects: [],
+      hoverCell: null
     },
     ai: {
       enabled: false,
@@ -121,7 +122,8 @@ function cloneStateSnapshot() {
     ui: {
       message: state.ui.message,
       logs: [...state.ui.logs],
-      effects: []
+      effects: [],
+      hoverCell: state.ui.hoverCell
     }
   };
 }
@@ -135,7 +137,8 @@ function restoreSnapshot(snapshot) {
     ui: {
       message: snapshot.ui.message,
       logs: snapshot.ui.logs,
-      effects: []
+      effects: [],
+      hoverCell: snapshot.ui.hoverCell
     }
   };
 }
@@ -228,9 +231,12 @@ function getSkillOptions() {
 }
 
 function renderStatus() {
+  const phaseKey = getPhaseKey();
   dom.modeLabel.textContent = "本地双人 · AI 预留";
   dom.turnLabel.textContent = `第 ${state.match.turn} 手`;
   dom.phaseLabel.textContent = getPhaseLabel();
+  document.body.dataset.turn = state.match.currentPlayer;
+  document.body.dataset.phase = phaseKey;
 
   if (state.match.status === "finished") {
     dom.triggerLabel.textContent = `${PLAYER_LABELS[state.match.winner]} 完成终局`;
@@ -396,7 +402,15 @@ function renderBoard() {
   const winningCells = new Set(
     state.board.winningLine.map((cell) => `${cell.row}-${cell.col}`)
   );
+  const triggerCells = new Set(
+    (state.skill.pendingTrigger?.line || []).map(([row, col]) => `${row}-${col}`)
+  );
   const fragment = document.createDocumentFragment();
+
+  dom.board.classList.toggle("preview-black", state.match.currentPlayer === "black");
+  dom.board.classList.toggle("preview-white", state.match.currentPlayer === "white");
+  dom.board.classList.toggle("skill-targeting", Boolean(state.skill.selectedSkill));
+  dom.board.classList.toggle("trigger-active", Boolean(state.skill.pendingTrigger));
 
   for (let row = 0; row < BOARD_SIZE; row += 1) {
     for (let col = 0; col < BOARD_SIZE; col += 1) {
@@ -411,6 +425,8 @@ function renderBoard() {
 
       if (stone) {
         button.classList.add("stone", stone);
+      } else {
+        button.classList.add("empty");
       }
 
       if (state.board.lastMove && state.board.lastMove.row === row && state.board.lastMove.col === col) {
@@ -427,6 +443,18 @@ function renderBoard() {
 
       if (winningCells.has(key)) {
         button.classList.add("winning");
+      }
+
+      if (triggerCells.has(key)) {
+        button.classList.add("trigger-line");
+      }
+
+      if (
+        state.ui.hoverCell &&
+        state.ui.hoverCell.row === row &&
+        state.ui.hoverCell.col === col
+      ) {
+        button.classList.add("hovered");
       }
 
       const effectClass = getEffectClass(row, col);
@@ -753,6 +781,52 @@ function handleBoardClick(row, col) {
   placeStone(row, col);
 }
 
+function handleCellHover(row, col) {
+  if (state.match.status === "finished") {
+    return;
+  }
+
+  if (state.skill.selectedSkill) {
+    state.ui.hoverCell = { row, col };
+    updateBoardHoverState();
+    return;
+  }
+
+  if (state.board.cells[row][col] || hasBlockedCell(row, col, state.match.currentPlayer)) {
+    clearHoverCell();
+    return;
+  }
+
+  state.ui.hoverCell = { row, col };
+  updateBoardHoverState();
+}
+
+function clearHoverCell() {
+  if (!state.ui.hoverCell) {
+    return;
+  }
+
+  state.ui.hoverCell = null;
+  updateBoardHoverState();
+}
+
+function updateBoardHoverState() {
+  const cells = dom.board.querySelectorAll(".cell");
+
+  cells.forEach((cell) => cell.classList.remove("hovered"));
+
+  if (!state.ui.hoverCell) {
+    return;
+  }
+
+  const selector = `.cell[data-row="${state.ui.hoverCell.row}"][data-col="${state.ui.hoverCell.col}"]`;
+  const hoveredCell = dom.board.querySelector(selector);
+
+  if (hoveredCell) {
+    hoveredCell.classList.add("hovered");
+  }
+}
+
 function resetGame() {
   state = createInitialState();
   renderAll();
@@ -790,6 +864,16 @@ function bindEvents() {
   dom.modalNewGame.addEventListener("click", resetGame);
   dom.undoMove.addEventListener("click", undoMove);
   dom.skipSkill.addEventListener("click", skipSkill);
+  dom.board.addEventListener("mouseover", (event) => {
+    const cell = event.target.closest(".cell");
+
+    if (!cell || !dom.board.contains(cell)) {
+      return;
+    }
+
+    handleCellHover(Number(cell.dataset.row), Number(cell.dataset.col));
+  });
+  dom.board.addEventListener("mouseleave", clearHoverCell);
 }
 
 bindEvents();
