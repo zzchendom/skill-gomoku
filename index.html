@@ -3,29 +3,111 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Neon Sudoku</title>
+  <title>技能五子棋 | Neon Skill Gomoku</title>
   <link rel="stylesheet" href="./style.css">
 </head>
 <body>
   <main class="app">
     <section class="hero">
       <p class="eyebrow">Git + GitHub 实战带练</p>
-      <h1>Neon Sudoku</h1>
-      <p class="subtitle">我们的目标：做一个酷炫、可玩的数独游戏，并在过程中学会规范的版本管理。</p>
+      <h1>技能五子棋</h1>
+      <p class="subtitle">
+        五子连珠仍然是核心胜利条件，但每次新形成 3 连或 4 连，都会点燃一段技能回合。
+        我们会在开发过程中同步练习规范的版本管理。
+      </p>
     </section>
 
-    <section class="panel">
-      <div class="toolbar">
-        <button id="new-game" type="button">新游戏</button>
-        <button id="check-board" type="button">检查</button>
-        <button id="reset-board" type="button">重置</button>
+    <section class="panel arena">
+      <header class="statusbar">
+        <div class="status-card">
+          <span class="status-label">模式</span>
+          <strong id="mode-label">本地双人 · AI 预留</strong>
+        </div>
+        <div class="status-card">
+          <span class="status-label">回合</span>
+          <strong id="turn-label">第 1 手</strong>
+        </div>
+        <div class="status-card">
+          <span class="status-label">阶段</span>
+          <strong id="phase-label">落子中</strong>
+        </div>
+        <div class="status-card trigger-card">
+          <span class="status-label">技能火花</span>
+          <strong id="trigger-label">等待连段触发</strong>
+        </div>
+      </header>
+
+      <div class="layout">
+        <section class="board-stage">
+          <div class="board-frame">
+            <div class="board-head">
+              <div class="player-badge player-badge-black" id="black-badge">
+                <span class="badge-dot"></span>
+                <span>夜幕执子</span>
+              </div>
+              <div class="player-badge player-badge-white" id="white-badge">
+                <span class="badge-dot"></span>
+                <span>星辉执子</span>
+              </div>
+            </div>
+
+            <div id="board" class="board" aria-label="技能五子棋棋盘"></div>
+
+            <p id="message" class="message">
+              先占据中心，争取做出 3 连来点亮技能面板。
+            </p>
+          </div>
+        </section>
+
+        <aside class="sidebar">
+          <section class="sidebar-card controls-card">
+            <h2>对局控制</h2>
+            <div class="toolbar">
+              <button id="new-game" type="button">新对局</button>
+              <button id="undo-move" type="button">悔棋</button>
+              <button id="skip-skill" type="button">跳过技能</button>
+            </div>
+          </section>
+
+          <section class="sidebar-card skills-card">
+            <div class="card-head">
+              <h2>技能栏</h2>
+              <span id="skill-hint" class="chip">未触发</span>
+            </div>
+            <div id="skill-list" class="skill-list"></div>
+          </section>
+
+          <section class="sidebar-card log-card">
+            <div class="card-head">
+              <h2>战斗日志</h2>
+              <span class="chip ghost">最新 8 条</span>
+            </div>
+            <ul id="log-list" class="log-list"></ul>
+          </section>
+
+          <details class="sidebar-card rules-card">
+            <summary>规则与技能说明</summary>
+            <ul class="rules-list">
+              <li>棋盘为 15x15，双方轮流落子，先形成 5 连的一方获胜。</li>
+              <li>本回合新形成 3 连会触发小技能，本回合新形成 4 连会触发大技能。</li>
+              <li>每回合最多触发 1 次技能，技能造成的变化不会在本回合直接判胜。</li>
+              <li>首版技能：封锁、冲击、爆破、转化。</li>
+              <li>当前版本预留了 AI 状态入口，后续可以再接 DeepSeek。</li>
+            </ul>
+          </details>
+        </aside>
       </div>
-
-      <div id="board" class="board" aria-label="数独棋盘"></div>
-
-      <p id="message" class="message">第一步先把项目跑起来，后面我们再逐步加上真正的数独规则。</p>
     </section>
   </main>
+
+  <div id="winner-modal" class="modal hidden" aria-hidden="true">
+    <div class="modal-card">
+      <p class="eyebrow">对局结算</p>
+      <h2 id="winner-title">胜负已分</h2>
+      <p id="winner-text" class="modal-text"></p>
+      <button id="modal-new-game" type="button">再来一局</button>
+    </div>
+  </div>
 
   <script src="./script.js"></script>
 </body>
