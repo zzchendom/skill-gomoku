@@ -21,16 +21,52 @@ body {
   min-height: 100vh;
   font-family: "Segoe UI", Arial, sans-serif;
   color: var(--text-main);
+  position: relative;
+  overflow-x: hidden;
   background:
     radial-gradient(circle at top, rgba(83, 101, 255, 0.3), transparent 35%),
     radial-gradient(circle at 80% 20%, rgba(0, 212, 255, 0.12), transparent 25%),
     linear-gradient(135deg, #090b18, #141a34 45%, #090b18);
 }
 
+body::before,
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+}
+
+body::before {
+  background:
+    linear-gradient(
+      180deg,
+      transparent 0%,
+      rgba(126, 231, 255, 0.025) 48%,
+      rgba(126, 231, 255, 0.06) 50%,
+      rgba(126, 231, 255, 0.025) 52%,
+      transparent 100%
+    );
+  background-size: 100% 160px;
+  animation: scanline 11s linear infinite;
+}
+
+body::after {
+  background:
+    radial-gradient(circle at 15% 20%, rgba(126, 231, 255, 0.08), transparent 18%),
+    radial-gradient(circle at 82% 14%, rgba(140, 91, 255, 0.09), transparent 20%),
+    radial-gradient(circle at 60% 80%, rgba(125, 255, 188, 0.05), transparent 18%);
+  filter: blur(22px);
+  opacity: 0.9;
+}
+
 .app {
   width: min(1100px, calc(100% - 32px));
   margin: 0 auto;
   padding: 48px 0 64px;
+  position: relative;
+  z-index: 1;
 }
 
 .hero {
@@ -82,6 +118,14 @@ h1 {
   border: 1px solid rgba(167, 181, 255, 0.14);
   border-radius: 18px;
   background: rgba(13, 18, 38, 0.8);
+  transition: border-color 180ms ease, box-shadow 180ms ease, transform 180ms ease;
+}
+
+.status-card:hover,
+.sidebar-card:hover {
+  border-color: rgba(126, 231, 255, 0.24);
+  box-shadow: 0 0 28px rgba(126, 231, 255, 0.08);
+  transform: translateY(-1px);
 }
 
 .status-label {
@@ -93,6 +137,12 @@ h1 {
 
 .trigger-card strong {
   color: var(--accent-lime);
+}
+
+body[data-phase="skillSelect"] .trigger-card,
+body[data-phase="targeting"] .trigger-card {
+  border-color: rgba(125, 255, 188, 0.45);
+  box-shadow: 0 0 24px rgba(125, 255, 188, 0.12);
 }
 
 .layout {
@@ -109,12 +159,31 @@ h1 {
 
 .board-frame {
   padding: 20px;
+  position: relative;
   border: 1px solid rgba(126, 231, 255, 0.12);
   border-radius: 22px;
   background:
     linear-gradient(180deg, rgba(18, 24, 55, 0.96), rgba(10, 14, 32, 0.92)),
     rgba(8, 11, 28, 0.72);
   box-shadow: inset 0 0 0 1px rgba(126, 231, 255, 0.08);
+  overflow: hidden;
+}
+
+.board-frame::after {
+  content: "";
+  position: absolute;
+  inset: -20%;
+  background: linear-gradient(
+    120deg,
+    transparent 35%,
+    rgba(126, 231, 255, 0.06) 48%,
+    rgba(126, 231, 255, 0.14) 50%,
+    rgba(126, 231, 255, 0.06) 52%,
+    transparent 65%
+  );
+  transform: translateX(-85%);
+  animation: arenaSweep 9s ease-in-out infinite;
+  pointer-events: none;
 }
 
 .board-head {
@@ -170,6 +239,14 @@ button:disabled {
   box-shadow:
     0 0 0 1px rgba(126, 231, 255, 0.08),
     0 0 40px rgba(0, 212, 255, 0.08);
+  transition: box-shadow 180ms ease, transform 180ms ease;
+}
+
+.board.trigger-active {
+  box-shadow:
+    0 0 0 1px rgba(125, 255, 188, 0.2),
+    0 0 44px rgba(125, 255, 188, 0.16),
+    0 0 90px rgba(125, 255, 188, 0.08);
 }
 
 .cell {
@@ -180,6 +257,7 @@ button:disabled {
   background: transparent;
   box-shadow: inset 0 0 12px rgba(126, 231, 255, 0.03);
   padding: 0;
+  overflow: hidden;
 }
 
 .cell::before,
@@ -196,11 +274,13 @@ button:disabled {
   height: 36%;
   border-radius: 50%;
   transform: scale(0);
-  transition: transform 180ms ease;
+  opacity: 0;
+  transition: transform 180ms ease, opacity 180ms ease, filter 180ms ease;
 }
 
 .cell.stone::before {
   transform: scale(1);
+  opacity: 1;
 }
 
 .cell.black::before {
@@ -222,7 +302,9 @@ button:disabled {
 .cell.targetable::after,
 .cell.blocked::after,
 .cell.last-move::after,
-.cell.winning::after {
+.cell.winning::after,
+.cell.hovered::after,
+.cell.trigger-line::after {
   width: 68%;
   height: 68%;
   border-radius: 16px;
@@ -249,6 +331,46 @@ button:disabled {
   border: 1px solid rgba(255, 215, 64, 0.95);
   background: rgba(255, 215, 64, 0.16);
   box-shadow: 0 0 22px rgba(255, 215, 64, 0.35);
+}
+
+.cell.hovered::after {
+  border: 1px solid rgba(126, 231, 255, 0.45);
+  box-shadow: 0 0 20px rgba(126, 231, 255, 0.14);
+}
+
+.cell.trigger-line::after {
+  border: 1px solid rgba(125, 255, 188, 0.8);
+  background: rgba(125, 255, 188, 0.08);
+  box-shadow: 0 0 18px rgba(125, 255, 188, 0.25);
+  animation: triggerPulse 1.1s ease-in-out infinite;
+}
+
+.board.preview-black:not(.skill-targeting) .cell.empty:not(.blocked):hover::before,
+.board.preview-black:not(.skill-targeting) .cell.empty.hovered:not(.blocked)::before {
+  transform: scale(0.88);
+  opacity: 0.45;
+  background:
+    radial-gradient(circle at 30% 30%, #5875ff, #191f4d 42%, #080b18 72%);
+  box-shadow:
+    0 0 18px rgba(90, 113, 255, 0.28),
+    inset 0 0 8px rgba(255, 255, 255, 0.1);
+}
+
+.board.preview-white:not(.skill-targeting) .cell.empty:not(.blocked):hover::before,
+.board.preview-white:not(.skill-targeting) .cell.empty.hovered:not(.blocked)::before {
+  transform: scale(0.88);
+  opacity: 0.5;
+  background:
+    radial-gradient(circle at 30% 30%, #ffffff, #b3f4ff 40%, #80bfff 72%);
+  box-shadow:
+    0 0 18px rgba(126, 231, 255, 0.3),
+    inset 0 0 8px rgba(255, 255, 255, 0.22);
+}
+
+.board.skill-targeting .cell.targetable:hover {
+  box-shadow:
+    inset 0 0 12px rgba(125, 255, 188, 0.08),
+    0 0 22px rgba(125, 255, 188, 0.14);
 }
 
 .cell.effect-burst {
@@ -278,6 +400,11 @@ button:disabled {
   color: #fff;
   border-color: rgba(126, 231, 255, 0.35);
   box-shadow: 0 0 22px rgba(126, 231, 255, 0.14);
+}
+
+body[data-turn="black"] .player-badge-black.active,
+body[data-turn="white"] .player-badge-white.active {
+  transform: translateY(-1px);
 }
 
 .badge-dot {
@@ -325,6 +452,7 @@ button:disabled {
   background: rgba(126, 231, 255, 0.14);
   color: var(--accent-cyan);
   font-size: 0.82rem;
+  transition: box-shadow 180ms ease, background 180ms ease;
 }
 
 .chip.ghost {
@@ -345,6 +473,28 @@ button:disabled {
   background: rgba(21, 28, 58, 0.96);
   box-shadow: none;
   border: 1px solid rgba(167, 181, 255, 0.14);
+  position: relative;
+  overflow: hidden;
+}
+
+.skill-button::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    110deg,
+    transparent 20%,
+    rgba(126, 231, 255, 0.06) 45%,
+    rgba(126, 231, 255, 0.14) 50%,
+    rgba(126, 231, 255, 0.06) 55%,
+    transparent 80%
+  );
+  transform: translateX(-120%);
+  transition: transform 260ms ease;
+}
+
+.skill-button:hover::after {
+  transform: translateX(120%);
 }
 
 .skill-button.selected {
@@ -376,6 +526,7 @@ button:disabled {
   background: rgba(255, 255, 255, 0.04);
   color: var(--text-muted);
   line-height: 1.5;
+  border-left: 2px solid rgba(126, 231, 255, 0.18);
 }
 
 .rules-card summary {
@@ -479,6 +630,39 @@ button:disabled {
   }
   75% {
     transform: translateX(-2px);
+  }
+}
+
+@keyframes triggerPulse {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 0.9;
+  }
+  50% {
+    transform: scale(1.06);
+    opacity: 1;
+  }
+}
+
+@keyframes arenaSweep {
+  0%,
+  100% {
+    transform: translateX(-85%) rotate(0deg);
+    opacity: 0.4;
+  }
+  50% {
+    transform: translateX(85%) rotate(2deg);
+    opacity: 0.85;
+  }
+}
+
+@keyframes scanline {
+  from {
+    background-position: 0 0;
+  }
+  to {
+    background-position: 0 160px;
   }
 }
 

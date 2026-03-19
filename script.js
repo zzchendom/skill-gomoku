@@ -98,7 +98,8 @@ function createInitialState() {
       logs: [
         "欢迎来到技能五子棋：五连获胜，3 连触发小技能，4 连触发大技能。"
       ],
-      effects: []
+      effects: [],
+      hoverCell: null
     },
     ai: {
       enabled: false,
@@ -121,7 +122,8 @@ function cloneStateSnapshot() {
     ui: {
       message: state.ui.message,
       logs: [...state.ui.logs],
-      effects: []
+      effects: [],
+      hoverCell: state.ui.hoverCell
     }
   };
 }
@@ -135,7 +137,8 @@ function restoreSnapshot(snapshot) {
     ui: {
       message: snapshot.ui.message,
       logs: snapshot.ui.logs,
-      effects: []
+      effects: [],
+      hoverCell: snapshot.ui.hoverCell
     }
   };
 }
@@ -228,9 +231,12 @@ function getSkillOptions() {
 }
 
 function renderStatus() {
+  const phaseKey = getPhaseKey();
   dom.modeLabel.textContent = "本地双人 · AI 预留";
   dom.turnLabel.textContent = `第 ${state.match.turn} 手`;
   dom.phaseLabel.textContent = getPhaseLabel();
+  document.body.dataset.turn = state.match.currentPlayer;
+  document.body.dataset.phase = phaseKey;
 
   if (state.match.status === "finished") {
     dom.triggerLabel.textContent = `${PLAYER_LABELS[state.match.winner]} 完成终局`;
@@ -396,7 +402,15 @@ function renderBoard() {
   const winningCells = new Set(
     state.board.winningLine.map((cell) => `${cell.row}-${cell.col}`)
   );
+  const triggerCells = new Set(
+    (state.skill.pendingTrigger?.line || []).map(([row, col]) => `${row}-${col}`)
+  );
   const fragment = document.createDocumentFragment();
+
+  dom.board.classList.toggle("preview-black", state.match.currentPlayer === "black");
+  dom.board.classList.toggle("preview-white", state.match.currentPlayer === "white");
+  dom.board.classList.toggle("skill-targeting", Boolean(state.skill.selectedSkill));
+  dom.board.classList.toggle("trigger-active", Boolean(state.skill.pendingTrigger));
 
   for (let row = 0; row < BOARD_SIZE; row += 1) {
     for (let col = 0; col < BOARD_SIZE; col += 1) {
@@ -411,6 +425,8 @@ function renderBoard() {
 
       if (stone) {
         button.classList.add("stone", stone);
+      } else {
+        button.classList.add("empty");
       }
 
       if (state.board.lastMove && state.board.lastMove.row === row && state.board.lastMove.col === col) {
@@ -429,12 +445,26 @@ function renderBoard() {
         button.classList.add("winning");
       }
 
+      if (triggerCells.has(key)) {
+        button.classList.add("trigger-line");
+      }
+
+      if (
+        state.ui.hoverCell &&
+        state.ui.hoverCell.row === row &&
+        state.ui.hoverCell.col === col
+      ) {
+        button.classList.add("hovered");
+      }
+
       const effectClass = getEffectClass(row, col);
       if (effectClass) {
         button.classList.add(effectClass);
       }
 
       button.addEventListener("click", () => handleBoardClick(row, col));
+      button.addEventListener("mouseenter", () => handleCellHover(row, col));
+      button.addEventListener("mouseleave", clearHoverCell);
       fragment.appendChild(button);
     }
   }
@@ -751,6 +781,35 @@ function handleBoardClick(row, col) {
   }
 
   placeStone(row, col);
+}
+
+function handleCellHover(row, col) {
+  if (state.match.status === "finished") {
+    return;
+  }
+
+  if (state.skill.selectedSkill) {
+    state.ui.hoverCell = { row, col };
+    renderBoard();
+    return;
+  }
+
+  if (state.board.cells[row][col] || hasBlockedCell(row, col, state.match.currentPlayer)) {
+    clearHoverCell();
+    return;
+  }
+
+  state.ui.hoverCell = { row, col };
+  renderBoard();
+}
+
+function clearHoverCell() {
+  if (!state.ui.hoverCell) {
+    return;
+  }
+
+  state.ui.hoverCell = null;
+  renderBoard();
 }
 
 function resetGame() {
