@@ -1676,5 +1676,45 @@ function bindEvents() {
   dom.board.addEventListener("mouseleave", clearHoverCell);
 }
 
+function dismissWelcome(mode) {
+  const welcomeModal = document.querySelector("#welcome-modal");
+  if (welcomeModal) {
+    welcomeModal.classList.add("hidden");
+    welcomeModal.setAttribute("aria-hidden", "true");
+  }
+
+  if (mode === "ai") {
+    state = createInitialState("ai");
+    state.ai.engine = "proxy";
+    state.ui.logs = ["AI 对战模式已启用，DeepSeek 代理已自动激活。你先执黑子。"];
+    state.ui.message = "你执黑子先行，AI 将在你落子后自动思考并应答。";
+  } else {
+    state = createInitialState("local-pvp");
+    state.ui.logs = ["本地双人模式：两位玩家轮流在同一台电脑上落子。"];
+    state.ui.message = "双人模式已就绪——夜幕执子先行，争取做出 3 连来点亮技能面板。";
+  }
+
+  renderAll();
+}
+
+function bindWelcome() {
+  const btnLocal = document.querySelector("#welcome-local");
+  const btnAi = document.querySelector("#welcome-ai");
+
+  if (btnLocal) {
+    btnLocal.addEventListener("click", () => {
+      SFX.newGame();
+      dismissWelcome("local-pvp");
+    });
+  }
+
+  if (btnAi) {
+    btnAi.addEventListener("click", () => {
+      SFX.newGame();
+      dismissWelcome("ai");
+    });
+  }
+}
+
 bindEvents();
-renderAll();
+bindWelcome();
