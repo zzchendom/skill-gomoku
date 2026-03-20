@@ -1,2 +1,4 @@
 Thumbs.db
 Desktop.ini
+proxy-server/.env
+proxy-server/node_modules

@@ -55,6 +55,34 @@ const DIFFICULTY_LABELS = {
 const STORAGE_PROXY_URL = "skill-gomoku-ai-proxy-url";
 const STORAGE_PROXY_TOKEN = "skill-gomoku-ai-proxy-token";
 
+function getDefaultProxyUrl() {
+  return (
+    (typeof window !== "undefined" &&
+      window.SKILL_GOMOKU_CONFIG?.defaultProxyUrl?.trim()) ||
+    ""
+  );
+}
+
+function getDefaultProxyToken() {
+  return (
+    (typeof window !== "undefined" &&
+      window.SKILL_GOMOKU_CONFIG?.defaultProxyToken) ||
+    ""
+  );
+}
+
+function getEffectiveProxyUrl() {
+  return (
+    sessionStorage.getItem(STORAGE_PROXY_URL)?.trim() || getDefaultProxyUrl()
+  );
+}
+
+function getEffectiveProxyToken() {
+  return (
+    sessionStorage.getItem(STORAGE_PROXY_TOKEN) || getDefaultProxyToken() || ""
+  );
+}
+
 const dom = {
   board: document.querySelector("#board"),
   message: document.querySelector("#message"),
@@ -759,8 +787,10 @@ function loadProxyInputs() {
     return;
   }
 
-  dom.proxyUrl.value = sessionStorage.getItem(STORAGE_PROXY_URL) || "";
-  dom.proxyToken.value = sessionStorage.getItem(STORAGE_PROXY_TOKEN) || "";
+  const storedUrl = sessionStorage.getItem(STORAGE_PROXY_URL)?.trim() || "";
+  const storedToken = sessionStorage.getItem(STORAGE_PROXY_TOKEN) || "";
+  dom.proxyUrl.value = storedUrl || getDefaultProxyUrl();
+  dom.proxyToken.value = storedToken || getDefaultProxyToken();
 }
 
 function saveProxyConfig() {
@@ -798,13 +828,13 @@ function setEngine(engine) {
 }
 
 async function fetchMoveFromProxy() {
-  const url = sessionStorage.getItem(STORAGE_PROXY_URL)?.trim();
+  const url = getEffectiveProxyUrl();
 
   if (!url) {
     return null;
   }
 
-  const token = sessionStorage.getItem(STORAGE_PROXY_TOKEN) || "";
+  const token = getEffectiveProxyToken();
   const legalMoves = getLegalMoves("white");
 
   if (!legalMoves.length) {

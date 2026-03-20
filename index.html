@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>技能五子棋 | Neon Skill Gomoku</title>
   <link rel="stylesheet" href="./style.css">
+  <script src="./config.js"></script>
 </head>
 <body>
   <main class="app">
@@ -109,7 +110,8 @@
               </div>
               <div id="ai-proxy-panel" class="ai-proxy-panel hidden">
                 <p class="proxy-hint">
-                  浏览器不能直接调用 DeepSeek 密钥。请自建一个后端代理，把密钥放在服务器上，再把代理地址填到下面。
+                  浏览器不保存 DeepSeek 密钥。几个朋友可共用<strong>同一台</strong>代理服务（见仓库 <code>proxy-server</code>），密钥只放在服务器。
+                  也可在 <code>config.js</code> 里写默认代理 URL，大家拉同一份前端即可。
                 </p>
                 <label class="proxy-field">
                   <span>代理 URL</span>
