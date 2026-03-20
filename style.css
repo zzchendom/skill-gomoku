@@ -309,6 +309,77 @@ button:disabled {
   box-shadow: 0 0 16px rgba(125, 255, 188, 0.12);
 }
 
+.ai-engine-row {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.engine-switch {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.engine-button {
+  border-radius: 12px;
+  padding: 10px 8px;
+  font-size: 0.86rem;
+  background: rgba(21, 28, 58, 0.96);
+  border: 1px solid rgba(167, 181, 255, 0.14);
+  box-shadow: none;
+}
+
+.engine-button.active {
+  border-color: rgba(140, 91, 255, 0.55);
+  box-shadow: 0 0 16px rgba(140, 91, 255, 0.14);
+}
+
+.ai-proxy-panel {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(167, 181, 255, 0.16);
+  background: rgba(8, 12, 28, 0.65);
+}
+
+.ai-proxy-panel.hidden {
+  display: none;
+}
+
+.proxy-hint {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  line-height: 1.55;
+}
+
+.proxy-field {
+  display: grid;
+  gap: 4px;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
+.proxy-field input {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(126, 231, 255, 0.2);
+  background: rgba(5, 8, 20, 0.9);
+  color: var(--text-main);
+  font-size: 0.88rem;
+}
+
+.proxy-save-btn {
+  border-radius: 12px;
+  padding: 10px 14px;
+  font-size: 0.88rem;
+  background: linear-gradient(135deg, #5a3dad, #00a8cc);
+  box-shadow: 0 8px 20px rgba(90, 61, 173, 0.25);
+}
+
 .board-shell {
   position: relative;
   width: min(72vw, 720px);

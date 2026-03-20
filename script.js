@@ -52,6 +52,9 @@ const DIFFICULTY_LABELS = {
   hard: "硬核"
 };
 
+const STORAGE_PROXY_URL = "skill-gomoku-ai-proxy-url";
+const STORAGE_PROXY_TOKEN = "skill-gomoku-ai-proxy-token";
+
 const dom = {
   board: document.querySelector("#board"),
   message: document.querySelector("#message"),
@@ -70,6 +73,13 @@ const dom = {
   aiThinkingLayer: document.querySelector("#ai-thinking-layer"),
   aiDifficultyLabel: document.querySelector("#ai-difficulty-label"),
   aiDifficultyRow: document.querySelector("#ai-difficulty-row"),
+  aiEngineRow: document.querySelector("#ai-engine-row"),
+  aiProxyPanel: document.querySelector("#ai-proxy-panel"),
+  engineLocal: document.querySelector("#engine-local"),
+  engineProxy: document.querySelector("#engine-proxy"),
+  proxyUrl: document.querySelector("#proxy-url"),
+  proxyToken: document.querySelector("#proxy-token"),
+  proxySave: document.querySelector("#proxy-save"),
   difficultyButtons: document.querySelectorAll(".difficulty-button"),
   newGame: document.querySelector("#new-game"),
   undoMove: document.querySelector("#undo-move"),
@@ -120,7 +130,8 @@ function createInitialState(mode = "local-pvp") {
       pendingAction: null,
       thinking: false,
       timerId: null,
-      difficulty: "normal"
+      difficulty: "normal",
+      engine: "local"
     },
     history: []
   };
@@ -142,6 +153,7 @@ function cloneStateSnapshot() {
       provider: state.ai.provider,
       pendingAction: state.ai.pendingAction,
       difficulty: state.ai.difficulty,
+      engine: state.ai.engine,
       thinking: false,
       timerId: null
     }
@@ -166,6 +178,7 @@ function restoreSnapshot(snapshot) {
       provider: snapshot.ai.provider,
       pendingAction: snapshot.ai.pendingAction,
       difficulty: snapshot.ai.difficulty ?? state.ai.difficulty,
+      engine: snapshot.ai.engine ?? state.ai.engine,
       thinking: false,
       timerId: null
     }
@@ -284,8 +297,10 @@ function renderStatus() {
   const phaseKey = getPhaseKey();
   const difficultyKey = state.ai.difficulty in DIFFICULTY_LABELS ? state.ai.difficulty : "normal";
 
+  const engineTag = state.ai.engine === "proxy" ? "DeepSeek代理" : "本地引擎";
+
   dom.modeLabel.textContent = state.ai.enabled
-    ? `玩家 vs AI · ${DIFFICULTY_LABELS[difficultyKey]} · 本地引擎`
+    ? `玩家 vs AI · ${DIFFICULTY_LABELS[difficultyKey]} · ${engineTag}`
     : "本地双人 · AI 预留";
 
   let turnText = `第 ${state.match.turn} 手`;
@@ -317,6 +332,23 @@ function renderStatus() {
 
   if (dom.aiDifficultyRow) {
     dom.aiDifficultyRow.hidden = !state.ai.enabled;
+  }
+
+  if (dom.aiEngineRow) {
+    dom.aiEngineRow.hidden = !state.ai.enabled;
+  }
+
+  if (dom.engineLocal && dom.engineProxy) {
+    dom.engineLocal.classList.toggle("active", state.ai.engine !== "proxy");
+    dom.engineProxy.classList.toggle("active", state.ai.engine === "proxy");
+  }
+
+  if (dom.aiProxyPanel) {
+    dom.aiProxyPanel.classList.toggle("hidden", state.ai.engine !== "proxy");
+
+    if (state.ai.enabled && state.ai.engine === "proxy") {
+      loadProxyInputs();
+    }
   }
 
   dom.difficultyButtons.forEach((btn) => {
@@ -722,6 +754,125 @@ function getAIMove() {
   }, null);
 }
 
+function loadProxyInputs() {
+  if (!dom.proxyUrl || !dom.proxyToken) {
+    return;
+  }
+
+  dom.proxyUrl.value = sessionStorage.getItem(STORAGE_PROXY_URL) || "";
+  dom.proxyToken.value = sessionStorage.getItem(STORAGE_PROXY_TOKEN) || "";
+}
+
+function saveProxyConfig() {
+  const url = dom.proxyUrl.value.trim();
+  const token = dom.proxyToken.value;
+
+  if (url) {
+    sessionStorage.setItem(STORAGE_PROXY_URL, url);
+  } else {
+    sessionStorage.removeItem(STORAGE_PROXY_URL);
+  }
+
+  if (token) {
+    sessionStorage.setItem(STORAGE_PROXY_TOKEN, token);
+  } else {
+    sessionStorage.removeItem(STORAGE_PROXY_TOKEN);
+  }
+
+  pushLog(url ? "代理地址与 Token 已写入浏览器会话（未进 Git）。" : "已清除代理 URL。");
+  renderAll();
+}
+
+function setEngine(engine) {
+  if (!state.ai.enabled) {
+    return;
+  }
+
+  state.ai.engine = engine === "proxy" ? "proxy" : "local";
+  pushLog(
+    state.ai.engine === "proxy"
+      ? "已切换为 DeepSeek 代理模式：将请求你的后端，失败时回退本地引擎。"
+      : "已切换为本地启发式引擎。"
+  );
+  renderAll();
+}
+
+async function fetchMoveFromProxy() {
+  const url = sessionStorage.getItem(STORAGE_PROXY_URL)?.trim();
+
+  if (!url) {
+    return null;
+  }
+
+  const token = sessionStorage.getItem(STORAGE_PROXY_TOKEN) || "";
+  const legalMoves = getLegalMoves("white");
+
+  if (!legalMoves.length) {
+    return null;
+  }
+
+  const body = {
+    version: 1,
+    game: "skill-gomoku",
+    board: state.board.cells,
+    currentPlayer: "white",
+    legalMoves,
+    difficulty: state.ai.difficulty,
+    turn: state.match.turn
+  };
+
+  const headers = { "Content-Type": "application/json" };
+
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), 28000);
+
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(body),
+      signal: controller.signal
+    });
+
+    window.clearTimeout(timeoutId);
+
+    if (!response.ok) {
+      return null;
+    }
+
+    const data = await response.json();
+    const row = Number(data.row);
+    const col = Number(data.col);
+
+    if (!Number.isInteger(row) || !Number.isInteger(col)) {
+      return null;
+    }
+
+    if (!isInside(row, col) || state.board.cells[row][col]) {
+      return null;
+    }
+
+    if (hasBlockedCell(row, col, "white")) {
+      return null;
+    }
+
+    const legal = legalMoves.some((move) => move.row === row && move.col === col);
+
+    if (!legal) {
+      return null;
+    }
+
+    return { row, col };
+  } catch {
+    window.clearTimeout(timeoutId);
+    return null;
+  }
+}
+
 function maybeRunAI() {
   if (!state.ai.enabled || state.match.status === "finished") {
     return;
@@ -746,33 +897,47 @@ function maybeRunAI() {
   renderStatus();
 
   state.ai.timerId = window.setTimeout(() => {
-    state.ai.timerId = null;
+    void (async () => {
+      state.ai.timerId = null;
 
-    if (state.match.status === "finished" || state.match.currentPlayer !== "white") {
+      if (state.match.status === "finished" || state.match.currentPlayer !== "white") {
+        state.ai.thinking = false;
+        renderStatus();
+        return;
+      }
+
+      if (state.skill.pendingTrigger) {
+        pushLog("AI 当前使用的是本地占位引擎，本回合自动跳过技能。");
+        state.ai.thinking = false;
+        skipSkill();
+        return;
+      }
+
+      let move = null;
+
+      if (state.ai.engine === "proxy") {
+        move = await fetchMoveFromProxy();
+
+        if (!move) {
+          pushLog("DeepSeek/代理未返回合法落点或请求失败，已改用本地引擎。");
+        }
+      }
+
+      if (!move) {
+        move = getAIMove();
+      }
+
+      if (!move) {
+        state.ai.thinking = false;
+        setMessage("AI 没有找到可落子的格子。");
+        renderStatus();
+        return;
+      }
+
+      pushLog(`AI 锁定了 (${move.row + 1}, ${move.col + 1}) 作为下一手。`);
       state.ai.thinking = false;
-      renderStatus();
-      return;
-    }
-
-    if (state.skill.pendingTrigger) {
-      pushLog("AI 当前使用的是本地占位引擎，本回合自动跳过技能。");
-      state.ai.thinking = false;
-      skipSkill();
-      return;
-    }
-
-    const move = getAIMove();
-
-    if (!move) {
-      state.ai.thinking = false;
-      setMessage("AI 没有找到可落子的格子。");
-      renderStatus();
-      return;
-    }
-
-    pushLog(`AI 锁定了 (${move.row + 1}, ${move.col + 1}) 作为下一手。`);
-    state.ai.thinking = false;
-    placeStone(move.row, move.col);
+      placeStone(move.row, move.col);
+    })();
   }, getAIThinkDelayMs());
 }
 
@@ -1127,8 +1292,10 @@ function resetGame() {
   clearAITimer();
   const mode = state.match.mode;
   const difficulty = state.ai.difficulty;
+  const engine = state.ai.engine;
   state = createInitialState(mode);
   state.ai.difficulty = difficulty;
+  state.ai.engine = engine === "proxy" ? "proxy" : "local";
   renderAll();
 }
 
@@ -1163,10 +1330,12 @@ function skipSkill() {
 function setMode(mode) {
   clearAITimer();
   const previousDifficulty = state.ai.difficulty;
+  const previousEngine = state.ai.engine;
   state = createInitialState(mode);
 
   if (mode === "ai") {
     state.ai.difficulty = previousDifficulty in DIFFICULTY_LABELS ? previousDifficulty : "normal";
+    state.ai.engine = previousEngine === "proxy" ? "proxy" : "local";
   }
 
   state.ui.logs = [
@@ -1243,6 +1412,9 @@ function handleGlobalKeydown(event) {
 function bindEvents() {
   dom.modeLocal.addEventListener("click", () => setMode("local-pvp"));
   dom.modeAi.addEventListener("click", () => setMode("ai"));
+  dom.engineLocal.addEventListener("click", () => setEngine("local"));
+  dom.engineProxy.addEventListener("click", () => setEngine("proxy"));
+  dom.proxySave.addEventListener("click", saveProxyConfig);
   dom.difficultyButtons.forEach((btn) => {
     btn.addEventListener("click", () => setDifficulty(btn.dataset.difficulty));
   });
