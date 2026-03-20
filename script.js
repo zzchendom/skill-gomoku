@@ -59,6 +59,7 @@ const dom = {
   turnLabel: document.querySelector("#turn-label"),
   phaseLabel: document.querySelector("#phase-label"),
   triggerLabel: document.querySelector("#trigger-label"),
+  statsLabel: document.querySelector("#stats-label"),
   blackBadge: document.querySelector("#black-badge"),
   whiteBadge: document.querySelector("#white-badge"),
   skillHint: document.querySelector("#skill-hint"),
@@ -246,6 +247,27 @@ function getPhaseKey() {
   return "placing";
 }
 
+function countBoardStats() {
+  let black = 0;
+  let white = 0;
+
+  for (let row = 0; row < BOARD_SIZE; row += 1) {
+    for (let col = 0; col < BOARD_SIZE; col += 1) {
+      const cell = state.board.cells[row][col];
+
+      if (cell === "black") {
+        black += 1;
+      } else if (cell === "white") {
+        white += 1;
+      }
+    }
+  }
+
+  const empty = BOARD_SIZE * BOARD_SIZE - black - white;
+
+  return { black, white, empty };
+}
+
 function getSkillOptions() {
   if (!state.skill.pendingTrigger) {
     return [];
@@ -320,6 +342,11 @@ function renderStatus() {
 
   document.body.dataset.aiThinking = aiThinkingVisible ? "1" : "0";
   dom.whiteBadge.classList.toggle("ai-thinking", aiThinkingVisible);
+
+  if (dom.statsLabel) {
+    const { black, white, empty } = countBoardStats();
+    dom.statsLabel.textContent = `黑 ${black} · 白 ${white} · 空 ${empty}`;
+  }
 }
 
 function renderSkills() {
@@ -1164,6 +1191,55 @@ function setDifficulty(level) {
   renderAll();
 }
 
+function handleGlobalKeydown(event) {
+  if (event.defaultPrevented) {
+    return;
+  }
+
+  const target = event.target;
+  const tag = target && target.tagName;
+
+  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || target.isContentEditable) {
+    return;
+  }
+
+  if (event.ctrlKey || event.metaKey || event.altKey) {
+    return;
+  }
+
+  const { key } = event;
+
+  if (key === "Escape") {
+    if (state.skill.selectedSkill) {
+      event.preventDefault();
+      state.skill.selectedSkill = null;
+      setMessage("已取消技能选择。");
+      renderAll();
+    }
+
+    return;
+  }
+
+  if (key === "n" || key === "N") {
+    event.preventDefault();
+    resetGame();
+    return;
+  }
+
+  if (key === "u" || key === "U") {
+    event.preventDefault();
+    undoMove();
+    return;
+  }
+
+  if (key === "s" || key === "S") {
+    if (state.skill.pendingTrigger) {
+      event.preventDefault();
+      skipSkill();
+    }
+  }
+}
+
 function bindEvents() {
   dom.modeLocal.addEventListener("click", () => setMode("local-pvp"));
   dom.modeAi.addEventListener("click", () => setMode("ai"));
@@ -1174,6 +1250,7 @@ function bindEvents() {
   dom.modalNewGame.addEventListener("click", resetGame);
   dom.undoMove.addEventListener("click", undoMove);
   dom.skipSkill.addEventListener("click", skipSkill);
+  document.addEventListener("keydown", handleGlobalKeydown);
   dom.board.addEventListener("mouseover", (event) => {
     const cell = event.target.closest(".cell");
 

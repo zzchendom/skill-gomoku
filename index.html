@@ -27,6 +27,10 @@
           <span class="status-label">回合</span>
           <strong id="turn-label">第 1 手</strong>
         </div>
+        <div class="status-card stats-card">
+          <span class="status-label">盘面</span>
+          <strong id="stats-label">黑 0 · 白 0 · 空 225</strong>
+        </div>
         <div class="status-card">
           <span class="status-label">阶段</span>
           <strong id="phase-label">落子中</strong>
@@ -73,6 +77,16 @@
         </section>
 
         <aside class="sidebar">
+          <section class="sidebar-card shortcuts-card">
+            <h2>快捷键</h2>
+            <ul class="shortcut-list">
+              <li><kbd>N</kbd> 新对局</li>
+              <li><kbd>U</kbd> 悔棋</li>
+              <li><kbd>S</kbd> 跳过技能（有技能窗口时）</li>
+              <li><kbd>Esc</kbd> 取消已选技能</li>
+            </ul>
+          </section>
+
           <section class="sidebar-card controls-card">
             <h2>对局控制</h2>
             <div class="mode-switch" aria-label="对局模式切换">
@@ -118,6 +132,7 @@
               <li>每回合最多触发 1 次技能，技能造成的变化不会在本回合直接判胜。</li>
               <li>首版技能：封锁、冲击、爆破、转化。</li>
               <li>当前版本预留了 AI 状态入口，后续可以再接 DeepSeek。</li>
+              <li>键盘：<kbd>N</kbd> 新对局、<kbd>U</kbd> 悔棋、<kbd>S</kbd> 跳过技能、<kbd>Esc</kbd> 取消技能选择。</li>
             </ul>
           </details>
         </aside>
