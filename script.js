@@ -46,6 +46,12 @@ const PLAYER_LABELS = {
   white: "星辉执子"
 };
 
+const DIFFICULTY_LABELS = {
+  easy: "休闲",
+  normal: "标准",
+  hard: "硬核"
+};
+
 const dom = {
   board: document.querySelector("#board"),
   message: document.querySelector("#message"),
@@ -58,6 +64,12 @@ const dom = {
   skillHint: document.querySelector("#skill-hint"),
   skillList: document.querySelector("#skill-list"),
   logList: document.querySelector("#log-list"),
+  modeLocal: document.querySelector("#mode-local"),
+  modeAi: document.querySelector("#mode-ai"),
+  aiThinkingLayer: document.querySelector("#ai-thinking-layer"),
+  aiDifficultyLabel: document.querySelector("#ai-difficulty-label"),
+  aiDifficultyRow: document.querySelector("#ai-difficulty-row"),
+  difficultyButtons: document.querySelectorAll(".difficulty-button"),
   newGame: document.querySelector("#new-game"),
   undoMove: document.querySelector("#undo-move"),
   skipSkill: document.querySelector("#skip-skill"),
@@ -73,7 +85,7 @@ function createInitialBoard() {
   return Array.from({ length: BOARD_SIZE }, () => Array(BOARD_SIZE).fill(null));
 }
 
-function createInitialState() {
+function createInitialState(mode = "local-pvp") {
   return {
     board: {
       size: BOARD_SIZE,
@@ -86,7 +98,7 @@ function createInitialState() {
       turn: 1,
       status: "playing",
       winner: null,
-      mode: "local-pvp"
+      mode
     },
     skill: {
       pendingTrigger: null,
@@ -102,16 +114,15 @@ function createInitialState() {
       hoverCell: null
     },
     ai: {
-      enabled: false,
+      enabled: mode === "ai",
       provider: "reserved",
-      pendingAction: null
+      pendingAction: null,
+      thinking: false,
+      timerId: null,
+      difficulty: "normal"
     },
     history: []
   };
-}
-
-function getAIMove() {
-  return null;
 }
 
 function cloneStateSnapshot() {
@@ -124,6 +135,14 @@ function cloneStateSnapshot() {
       logs: [...state.ui.logs],
       effects: [],
       hoverCell: state.ui.hoverCell
+    },
+    ai: {
+      enabled: state.ai.enabled,
+      provider: state.ai.provider,
+      pendingAction: state.ai.pendingAction,
+      difficulty: state.ai.difficulty,
+      thinking: false,
+      timerId: null
     }
   };
 }
@@ -139,6 +158,15 @@ function restoreSnapshot(snapshot) {
       logs: snapshot.ui.logs,
       effects: [],
       hoverCell: snapshot.ui.hoverCell
+    },
+    ai: {
+      ...state.ai,
+      enabled: snapshot.ai.enabled,
+      provider: snapshot.ai.provider,
+      pendingAction: snapshot.ai.pendingAction,
+      difficulty: snapshot.ai.difficulty ?? state.ai.difficulty,
+      thinking: false,
+      timerId: null
     }
   };
 }
@@ -232,8 +260,18 @@ function getSkillOptions() {
 
 function renderStatus() {
   const phaseKey = getPhaseKey();
-  dom.modeLabel.textContent = "本地双人 · AI 预留";
-  dom.turnLabel.textContent = `第 ${state.match.turn} 手`;
+  const difficultyKey = state.ai.difficulty in DIFFICULTY_LABELS ? state.ai.difficulty : "normal";
+
+  dom.modeLabel.textContent = state.ai.enabled
+    ? `玩家 vs AI · ${DIFFICULTY_LABELS[difficultyKey]} · 本地引擎`
+    : "本地双人 · AI 预留";
+
+  let turnText = `第 ${state.match.turn} 手`;
+  if (state.ai.enabled && state.match.status === "playing") {
+    turnText +=
+      state.match.currentPlayer === "black" ? " · 你的回合" : " · AI 回合";
+  }
+  dom.turnLabel.textContent = turnText;
   dom.phaseLabel.textContent = getPhaseLabel();
   document.body.dataset.turn = state.match.currentPlayer;
   document.body.dataset.phase = phaseKey;
@@ -252,6 +290,36 @@ function renderStatus() {
   dom.message.textContent = state.ui.message;
   dom.undoMove.disabled = state.history.length === 0;
   dom.skipSkill.disabled = !state.skill.pendingTrigger;
+  dom.modeLocal.classList.toggle("active", !state.ai.enabled);
+  dom.modeAi.classList.toggle("active", state.ai.enabled);
+
+  if (dom.aiDifficultyRow) {
+    dom.aiDifficultyRow.hidden = !state.ai.enabled;
+  }
+
+  dom.difficultyButtons.forEach((btn) => {
+    const level = btn.dataset.difficulty;
+    btn.classList.toggle("active", level === difficultyKey);
+    btn.disabled = !state.ai.enabled;
+  });
+
+  if (dom.aiDifficultyLabel) {
+    dom.aiDifficultyLabel.textContent = DIFFICULTY_LABELS[difficultyKey];
+  }
+
+  const aiThinkingVisible =
+    state.ai.enabled &&
+    state.match.status === "playing" &&
+    state.match.currentPlayer === "white" &&
+    state.ai.thinking;
+
+  if (dom.aiThinkingLayer) {
+    dom.aiThinkingLayer.classList.toggle("hidden", !aiThinkingVisible);
+    dom.aiThinkingLayer.setAttribute("aria-hidden", String(!aiThinkingVisible));
+  }
+
+  document.body.dataset.aiThinking = aiThinkingVisible ? "1" : "0";
+  dom.whiteBadge.classList.toggle("ai-thinking", aiThinkingVisible);
 }
 
 function renderSkills() {
@@ -493,6 +561,192 @@ function renderAll() {
   renderLogs();
   renderBoard();
   renderWinnerModal();
+  maybeRunAI();
+}
+
+function clearAITimer() {
+  if (state.ai.timerId) {
+    window.clearTimeout(state.ai.timerId);
+    state.ai.timerId = null;
+  }
+
+  state.ai.thinking = false;
+}
+
+function getLegalMoves(player) {
+  const moves = [];
+
+  for (let row = 0; row < BOARD_SIZE; row += 1) {
+    for (let col = 0; col < BOARD_SIZE; col += 1) {
+      if (state.board.cells[row][col]) {
+        continue;
+      }
+
+      if (hasBlockedCell(row, col, player)) {
+        continue;
+      }
+
+      moves.push({ row, col });
+    }
+  }
+
+  return moves;
+}
+
+function getNeighborCount(row, col) {
+  let count = 0;
+
+  for (let dr = -1; dr <= 1; dr += 1) {
+    for (let dc = -1; dc <= 1; dc += 1) {
+      if (dr === 0 && dc === 0) {
+        continue;
+      }
+
+      const nextRow = row + dr;
+      const nextCol = col + dc;
+
+      if (isInside(nextRow, nextCol) && state.board.cells[nextRow][nextCol]) {
+        count += 1;
+      }
+    }
+  }
+
+  return count;
+}
+
+function simulatedLineLength(row, col, player) {
+  if (!isInside(row, col) || state.board.cells[row][col]) {
+    return 0;
+  }
+
+  let best = 0;
+
+  DIRECTIONS.forEach(([dr, dc]) => {
+    let len = 1;
+    let r = row + dr;
+    let c = col + dc;
+
+    while (isInside(r, c) && state.board.cells[r][c] === player) {
+      len += 1;
+      r += dr;
+      c += dc;
+    }
+
+    r = row - dr;
+    c = col - dc;
+
+    while (isInside(r, c) && state.board.cells[r][c] === player) {
+      len += 1;
+      r -= dr;
+      c -= dc;
+    }
+
+    best = Math.max(best, len);
+  });
+
+  return best;
+}
+
+function scoreAIMove(row, col) {
+  const difficulty = state.ai.difficulty in DIFFICULTY_LABELS ? state.ai.difficulty : "normal";
+  const center = (BOARD_SIZE - 1) / 2;
+  const centerDistance = Math.abs(row - center) + Math.abs(col - center);
+  const neighborScore = getNeighborCount(row, col) * 18;
+  const centerScore = Math.max(0, 16 - centerDistance);
+
+  if (difficulty === "easy") {
+    const noise = Math.random() * 28;
+    return neighborScore * 0.45 + centerScore * 0.85 + noise;
+  }
+
+  const attack = simulatedLineLength(row, col, "white");
+  const block = simulatedLineLength(row, col, "black");
+  const tacticWeight = difficulty === "hard" ? 1 : 0.55;
+  const tactic =
+    (attack * 105 + block * 92) * tacticWeight;
+  const noise = Math.random() * (difficulty === "hard" ? 2.2 : 4.5);
+
+  return tactic + neighborScore + centerScore + noise;
+}
+
+function getAIThinkDelayMs() {
+  const difficulty = state.ai.difficulty in DIFFICULTY_LABELS ? state.ai.difficulty : "normal";
+  const base = { easy: 1180, normal: 760, hard: 520 }[difficulty];
+  const jitter = { easy: 520, normal: 320, hard: 200 }[difficulty];
+
+  return base + Math.random() * jitter;
+}
+
+function getAIMove() {
+  const moves = getLegalMoves("white");
+
+  if (!moves.length) {
+    return null;
+  }
+
+  return moves.reduce((best, current) => {
+    const currentScore = scoreAIMove(current.row, current.col);
+
+    if (!best || currentScore > best.score) {
+      return { ...current, score: currentScore };
+    }
+
+    return best;
+  }, null);
+}
+
+function maybeRunAI() {
+  if (!state.ai.enabled || state.match.status === "finished") {
+    return;
+  }
+
+  if (state.match.currentPlayer !== "white") {
+    clearAITimer();
+    return;
+  }
+
+  if (state.ai.thinking || state.ai.timerId) {
+    return;
+  }
+
+  state.ai.thinking = true;
+  const diffName = DIFFICULTY_LABELS[state.ai.difficulty] || "标准";
+  setMessage(
+    state.skill.pendingTrigger
+      ? `AI（${diffName}）正在处理技能窗口，本版会先自动跳过技能。`
+      : `AI（${diffName}）正在扫描盘面，请稍候…`
+  );
+  renderStatus();
+
+  state.ai.timerId = window.setTimeout(() => {
+    state.ai.timerId = null;
+
+    if (state.match.status === "finished" || state.match.currentPlayer !== "white") {
+      state.ai.thinking = false;
+      renderStatus();
+      return;
+    }
+
+    if (state.skill.pendingTrigger) {
+      pushLog("AI 当前使用的是本地占位引擎，本回合自动跳过技能。");
+      state.ai.thinking = false;
+      skipSkill();
+      return;
+    }
+
+    const move = getAIMove();
+
+    if (!move) {
+      state.ai.thinking = false;
+      setMessage("AI 没有找到可落子的格子。");
+      renderStatus();
+      return;
+    }
+
+    pushLog(`AI 锁定了 (${move.row + 1}, ${move.col + 1}) 作为下一手。`);
+    state.ai.thinking = false;
+    placeStone(move.row, move.col);
+  }, getAIThinkDelayMs());
 }
 
 function collectLine(row, col, dr, dc, player) {
@@ -570,7 +824,16 @@ function advanceTurn() {
   state.skill.pendingTrigger = null;
   state.skill.selectedSkill = null;
   state.board.winningLine = [];
-  setMessage(`${PLAYER_LABELS[state.match.currentPlayer]} 行动中。观察局势，争取做出下一条连段。`);
+
+  if (state.ai.enabled) {
+    if (state.match.currentPlayer === "black") {
+      setMessage("轮到你落子（夜幕执子）。尽量抢占要点，逼出 AI 的失误。");
+    } else {
+      setMessage("轮到星辉执子（AI）。棋盘上会出现演算遮罩，请等待它落子。");
+    }
+  } else {
+    setMessage(`${PLAYER_LABELS[state.match.currentPlayer]} 行动中。观察局势，争取做出下一条连段。`);
+  }
 }
 
 function placeStone(row, col) {
@@ -773,6 +1036,12 @@ function handleBoardClick(row, col) {
     return;
   }
 
+  if (state.ai.enabled && state.match.currentPlayer === "white") {
+    setMessage("当前轮到 AI 行动，请等待它完成思考。");
+    renderStatus();
+    return;
+  }
+
   if (state.skill.selectedSkill) {
     tryApplySkill(row, col);
     return;
@@ -828,11 +1097,16 @@ function updateBoardHoverState() {
 }
 
 function resetGame() {
-  state = createInitialState();
+  clearAITimer();
+  const mode = state.match.mode;
+  const difficulty = state.ai.difficulty;
+  state = createInitialState(mode);
+  state.ai.difficulty = difficulty;
   renderAll();
 }
 
 function undoMove() {
+  clearAITimer();
   if (!state.history.length) {
     setMessage("还没有可悔的棋步。");
     renderAll();
@@ -859,7 +1133,43 @@ function skipSkill() {
   renderAll();
 }
 
+function setMode(mode) {
+  clearAITimer();
+  const previousDifficulty = state.ai.difficulty;
+  state = createInitialState(mode);
+
+  if (mode === "ai") {
+    state.ai.difficulty = previousDifficulty in DIFFICULTY_LABELS ? previousDifficulty : "normal";
+  }
+
+  state.ui.logs = [
+    mode === "ai"
+      ? "AI 模式已启用：当前使用本地占位引擎，后续可替换为 DeepSeek 决策。"
+      : "已切回本地双人模式，你可以手动控制双方走子。"
+  ];
+  state.ui.message =
+    mode === "ai"
+      ? "AI 模式已启用。你先执黑子，白子会在短暂思考后自动落子。"
+      : "已切回本地双人模式，双方都由你手动操作。";
+  renderAll();
+}
+
+function setDifficulty(level) {
+  if (!state.ai.enabled || !(level in DIFFICULTY_LABELS)) {
+    return;
+  }
+
+  state.ai.difficulty = level;
+  pushLog(`AI 难度已切换为 ${DIFFICULTY_LABELS[level]}。`);
+  renderAll();
+}
+
 function bindEvents() {
+  dom.modeLocal.addEventListener("click", () => setMode("local-pvp"));
+  dom.modeAi.addEventListener("click", () => setMode("ai"));
+  dom.difficultyButtons.forEach((btn) => {
+    btn.addEventListener("click", () => setDifficulty(btn.dataset.difficulty));
+  });
   dom.newGame.addEventListener("click", resetGame);
   dom.modalNewGame.addEventListener("click", resetGame);
   dom.undoMove.addEventListener("click", undoMove);
