@@ -803,8 +803,16 @@ body[data-turn="white"] .player-badge-white.active {
   border-color: rgba(255, 175, 97, 0.2);
 }
 
+.skill-button[data-skill-id="warp"] {
+  border-color: rgba(200, 160, 255, 0.18);
+}
+
 .skill-button[data-skill-id="convert"] {
   border-color: rgba(126, 231, 255, 0.2);
+}
+
+.skill-button[data-skill-id="siphon"] {
+  border-color: rgba(255, 130, 200, 0.2);
 }
 
 .skill-button[data-skill-id="block"].selected {
@@ -822,9 +830,19 @@ body[data-turn="white"] .player-badge-white.active {
   box-shadow: 0 0 22px rgba(255, 175, 97, 0.2);
 }
 
+.skill-button[data-skill-id="warp"].selected {
+  border-color: rgba(200, 160, 255, 0.65);
+  box-shadow: 0 0 20px rgba(200, 160, 255, 0.18);
+}
+
 .skill-button[data-skill-id="convert"].selected {
   border-color: rgba(126, 231, 255, 0.68);
   box-shadow: 0 0 22px rgba(126, 231, 255, 0.18);
+}
+
+.skill-button[data-skill-id="siphon"].selected {
+  border-color: rgba(255, 130, 200, 0.68);
+  box-shadow: 0 0 22px rgba(255, 130, 200, 0.2);
 }
 
 .skill-button small {
