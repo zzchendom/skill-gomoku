@@ -101,6 +101,27 @@
                 <button type="button" class="difficulty-button" data-difficulty="hard">硬核</button>
               </div>
             </div>
+            <div id="ai-engine-row" class="ai-engine-row" hidden>
+              <span class="difficulty-label">AI 决策</span>
+              <div class="engine-switch" role="group" aria-label="AI 决策来源">
+                <button type="button" id="engine-local" class="engine-button active">本地引擎</button>
+                <button type="button" id="engine-proxy" class="engine-button">DeepSeek 代理</button>
+              </div>
+              <div id="ai-proxy-panel" class="ai-proxy-panel hidden">
+                <p class="proxy-hint">
+                  浏览器不能直接调用 DeepSeek 密钥。请自建一个后端代理，把密钥放在服务器上，再把代理地址填到下面。
+                </p>
+                <label class="proxy-field">
+                  <span>代理 URL</span>
+                  <input id="proxy-url" type="url" autocomplete="off" placeholder="https://你的域名/api/gomoku-move">
+                </label>
+                <label class="proxy-field">
+                  <span>可选：Bearer Token</span>
+                  <input id="proxy-token" type="password" autocomplete="off" placeholder="仅保存在本机浏览器会话">
+                </label>
+                <button id="proxy-save" type="button" class="proxy-save-btn">保存到浏览器会话</button>
+              </div>
+            </div>
             <div class="toolbar">
               <button id="new-game" type="button">新对局</button>
               <button id="undo-move" type="button">悔棋</button>
@@ -131,7 +152,7 @@
               <li>本回合新形成 3 连会触发小技能，本回合新形成 4 连会触发大技能。</li>
               <li>每回合最多触发 1 次技能，技能造成的变化不会在本回合直接判胜。</li>
               <li>首版技能：封锁、冲击、爆破、转化。</li>
-              <li>当前版本预留了 AI 状态入口，后续可以再接 DeepSeek。</li>
+              <li>玩家 vs AI 模式下可选择「DeepSeek 代理」：由你的后端转发大模型，接口约定见 README。</li>
               <li>键盘：<kbd>N</kbd> 新对局、<kbd>U</kbd> 悔棋、<kbd>S</kbd> 跳过技能、<kbd>Esc</kbd> 取消技能选择。</li>
             </ul>
           </details>
