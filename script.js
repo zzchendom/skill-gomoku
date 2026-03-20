@@ -7,6 +7,85 @@ const DIRECTIONS = [
   [1, -1]
 ];
 
+const SFX = (() => {
+  let ctx = null;
+
+  function getCtx() {
+    if (!ctx) {
+      ctx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    if (ctx.state === "suspended") {
+      ctx.resume();
+    }
+    return ctx;
+  }
+
+  function tone(freq, duration, type = "sine", gain = 0.18) {
+    const ac = getCtx();
+    const osc = ac.createOscillator();
+    const g = ac.createGain();
+    osc.type = type;
+    osc.frequency.value = freq;
+    g.gain.setValueAtTime(gain, ac.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + duration);
+    osc.connect(g).connect(ac.destination);
+    osc.start();
+    osc.stop(ac.currentTime + duration);
+  }
+
+  function noise(duration, gain = 0.08) {
+    const ac = getCtx();
+    const buf = ac.createBuffer(1, ac.sampleRate * duration, ac.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+    const src = ac.createBufferSource();
+    src.buffer = buf;
+    const g = ac.createGain();
+    g.gain.setValueAtTime(gain, ac.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + duration);
+    src.connect(g).connect(ac.destination);
+    src.start();
+  }
+
+  return {
+    place() {
+      tone(880, 0.08, "triangle", 0.13);
+      noise(0.04, 0.06);
+    },
+    trigger() {
+      tone(660, 0.12, "sine", 0.12);
+      setTimeout(() => tone(880, 0.12, "sine", 0.12), 80);
+      setTimeout(() => tone(1100, 0.18, "sine", 0.10), 160);
+    },
+    skillCast(id) {
+      const map = {
+        block:   () => { tone(300, 0.25, "square", 0.09); tone(260, 0.30, "square", 0.07); },
+        shock:   () => { tone(200, 0.06, "sawtooth", 0.12); setTimeout(() => tone(400, 0.10, "sawtooth", 0.10), 60); },
+        blast:   () => { noise(0.35, 0.14); tone(120, 0.35, "sawtooth", 0.10); },
+        convert: () => { tone(440, 0.15, "sine", 0.10); setTimeout(() => tone(660, 0.20, "sine", 0.12), 100); },
+        warp:    () => { tone(1200, 0.08, "sine", 0.10); setTimeout(() => tone(600, 0.15, "sine", 0.12), 70); },
+        siphon:  () => { tone(180, 0.20, "sawtooth", 0.08); setTimeout(() => { tone(360, 0.15, "sine", 0.10); noise(0.20, 0.06); }, 120); }
+      };
+      (map[id] || map.block)();
+    },
+    win() {
+      [523, 659, 784, 1047].forEach((f, i) =>
+        setTimeout(() => tone(f, 0.35, "sine", 0.14), i * 120)
+      );
+    },
+    error() {
+      tone(180, 0.15, "square", 0.08);
+    },
+    click() {
+      tone(1000, 0.04, "triangle", 0.06);
+    },
+    newGame() {
+      tone(440, 0.10, "triangle", 0.08);
+      setTimeout(() => tone(660, 0.10, "triangle", 0.08), 80);
+    }
+  };
+})();
+
 const SKILLS = {
   block: {
     id: "block",
@@ -20,6 +99,12 @@ const SKILLS = {
     name: "冲击",
     description: "推动一枚紧邻本回合落点的敌子 1 格，若前方无空位则失效。"
   },
+  warp: {
+    id: "warp",
+    tier: "small",
+    name: "传送",
+    description: "将一枚紧邻本回合落点的己方棋子传送到棋盘任意空位。"
+  },
   blast: {
     id: "blast",
     tier: "large",
@@ -31,6 +116,12 @@ const SKILLS = {
     tier: "large",
     name: "转化",
     description: "转化一枚紧邻本回合落点的敌子，但本回合不会因此直接判胜。"
+  },
+  siphon: {
+    id: "siphon",
+    tier: "large",
+    name: "虹吸",
+    description: "选择一个中心点，吸收其菱形 2 格范围内所有敌子并移除。"
   }
 };
 
@@ -142,7 +233,8 @@ function createInitialState(mode = "local-pvp") {
     skill: {
       pendingTrigger: null,
       selectedSkill: null,
-      blockedCells: []
+      blockedCells: [],
+      warpSource: null
     },
     ui: {
       message: "先占据中心，争取做出 3 连来点亮技能面板。",
@@ -315,10 +407,10 @@ function getSkillOptions() {
   }
 
   if (state.skill.pendingTrigger.tier === "small") {
-    return [SKILLS.block, SKILLS.shock];
+    return [SKILLS.block, SKILLS.shock, SKILLS.warp];
   }
 
-  return [SKILLS.blast, SKILLS.convert];
+  return [SKILLS.blast, SKILLS.convert, SKILLS.siphon];
 }
 
 function renderStatus() {
@@ -440,8 +532,10 @@ function renderSkills() {
 
     button.addEventListener("click", () => {
       state.skill.selectedSkill = state.skill.selectedSkill === skill.id ? null : skill.id;
+      state.skill.warpSource = null;
 
       if (state.skill.selectedSkill) {
+        SFX.click();
         setMessage(`已选择技能“${skill.name}”，请点击棋盘上的有效目标。`);
       } else {
         setMessage("已取消技能选择。你可以重新选择本回合的技能，或跳过技能。");
@@ -521,6 +615,31 @@ function getTargetableCells() {
     }
   }
 
+  if (selectedSkill === "warp") {
+    if (!state.skill.warpSource) {
+      for (let dr = -1; dr <= 1; dr += 1) {
+        for (let dc = -1; dc <= 1; dc += 1) {
+          if (dr === 0 && dc === 0) continue;
+          const nr = row + dr;
+          const nc = col + dc;
+          if (isInside(nr, nc) && state.board.cells[nr][nc] === currentPlayer) {
+            if (nr !== row || nc !== col) {
+              valid.add(`${nr}-${nc}`);
+            }
+          }
+        }
+      }
+    } else {
+      for (let r = 0; r < BOARD_SIZE; r += 1) {
+        for (let c = 0; c < BOARD_SIZE; c += 1) {
+          if (!state.board.cells[r][c] && !hasBlockedCell(r, c, currentPlayer)) {
+            valid.add(`${r}-${c}`);
+          }
+        }
+      }
+    }
+  }
+
   if (selectedSkill === "blast") {
     for (let r = 0; r < BOARD_SIZE; r += 1) {
       for (let c = 0; c < BOARD_SIZE; c += 1) {
@@ -538,6 +657,26 @@ function getTargetableCells() {
               state.board.cells[cellRow][cellCol] === getOpponent(currentPlayer)
           )
         ) {
+          valid.add(`${r}-${c}`);
+        }
+      }
+    }
+  }
+
+  if (selectedSkill === "siphon") {
+    for (let r = 0; r < BOARD_SIZE; r += 1) {
+      for (let c = 0; c < BOARD_SIZE; c += 1) {
+        const diamond = [];
+        for (let dr = -2; dr <= 2; dr += 1) {
+          for (let dc = -2; dc <= 2; dc += 1) {
+            if (Math.abs(dr) + Math.abs(dc) <= 2) {
+              const cr = r + dr;
+              const cc = c + dc;
+              if (isInside(cr, cc)) diamond.push([cr, cc]);
+            }
+          }
+        }
+        if (diamond.some(([cr, cc]) => state.board.cells[cr][cc] === opponent)) {
           valid.add(`${r}-${c}`);
         }
       }
@@ -1045,6 +1184,7 @@ function advanceTurn() {
   state.match.turn += 1;
   state.skill.pendingTrigger = null;
   state.skill.selectedSkill = null;
+  state.skill.warpSource = null;
   state.board.winningLine = [];
 
   if (state.ai.enabled) {
@@ -1085,11 +1225,13 @@ function placeStone(row, col) {
   state.board.lastMove = { row, col };
   clearExpiredBlocks(currentPlayer);
   pushLog(`${PLAYER_LABELS[currentPlayer]} 落子到 (${row + 1}, ${col + 1})。`);
+  SFX.place();
 
   const result = analyzeMove(row, col, currentPlayer);
 
   if (result.outcome === "win") {
     endGame(currentPlayer, result.cells);
+    SFX.win();
     renderAll();
     return;
   }
@@ -1107,6 +1249,7 @@ function placeStone(row, col) {
     pushLog(
       `${PLAYER_LABELS[currentPlayer]} 触发了${result.tier === "small" ? "小技能" : "大技能"}窗口。`
     );
+    SFX.trigger();
     queueEffect(result.cells, "burst");
     renderAll();
     return;
@@ -1212,6 +1355,66 @@ function applyConvert(row, col) {
   return true;
 }
 
+function applyWarp(row, col) {
+  const currentPlayer = state.match.currentPlayer;
+
+  if (!state.skill.warpSource) {
+    if (state.board.cells[row][col] !== currentPlayer) {
+      setMessage("传送第一步：请点击紧邻本回合落点的一枚己方棋子。");
+      return "continue";
+    }
+    state.skill.warpSource = { row, col };
+    setMessage("已选中传送棋子，现在点击棋盘上的任意空位作为目的地。");
+    return "continue";
+  }
+
+  const src = state.skill.warpSource;
+
+  if (state.board.cells[row][col]) {
+    setMessage("目的地必须是空位。");
+    return "continue";
+  }
+
+  state.board.cells[row][col] = currentPlayer;
+  state.board.cells[src.row][src.col] = null;
+  pushLog(
+    `${PLAYER_LABELS[currentPlayer]} 将 (${src.row + 1}, ${src.col + 1}) 的己子传送到 (${row + 1}, ${col + 1})。`
+  );
+  setMessage("传送完成——棋子已瞬移至新阵地。");
+  queueEffect([[src.row, src.col], [row, col]], "shock", 700);
+  state.skill.warpSource = null;
+  return true;
+}
+
+function applySiphon(row, col) {
+  const opponent = getOpponent(state.match.currentPlayer);
+  const affected = [];
+
+  for (let dr = -2; dr <= 2; dr += 1) {
+    for (let dc = -2; dc <= 2; dc += 1) {
+      if (Math.abs(dr) + Math.abs(dc) > 2) continue;
+      const cr = row + dr;
+      const cc = col + dc;
+      if (isInside(cr, cc) && state.board.cells[cr][cc] === opponent) {
+        state.board.cells[cr][cc] = null;
+        affected.push([cr, cc]);
+      }
+    }
+  }
+
+  if (!affected.length) {
+    setMessage("虹吸落空：菱形范围内没有敌子。");
+    return false;
+  }
+
+  pushLog(
+    `${PLAYER_LABELS[state.match.currentPlayer]} 在 (${row + 1}, ${col + 1}) 释放虹吸，吸除了 ${affected.length} 枚敌子。`
+  );
+  setMessage("虹吸生效——敌方阵型出现真空地带。");
+  queueEffect(affected, "blast", 900);
+  return true;
+}
+
 function tryApplySkill(row, col) {
   const skillId = state.skill.selectedSkill;
   const targetableCells = getTargetableCells();
@@ -1230,25 +1433,30 @@ function tryApplySkill(row, col) {
 
   if (skillId === "block") {
     success = applyBlock(row, col);
-  }
-
-  if (skillId === "shock") {
+  } else if (skillId === "shock") {
     success = applyShock(row, col);
-  }
-
-  if (skillId === "blast") {
+  } else if (skillId === "warp") {
+    success = applyWarp(row, col);
+  } else if (skillId === "blast") {
     success = applyBlast(row, col);
-  }
-
-  if (skillId === "convert") {
+  } else if (skillId === "convert") {
     success = applyConvert(row, col);
+  } else if (skillId === "siphon") {
+    success = applySiphon(row, col);
   }
 
-  if (!success) {
+  if (success === "continue") {
     renderAll();
     return;
   }
 
+  if (!success) {
+    SFX.error();
+    renderAll();
+    return;
+  }
+
+  SFX.skillCast(skillId);
   advanceTurn();
   renderAll();
 }
@@ -1326,6 +1534,7 @@ function resetGame() {
   state = createInitialState(mode);
   state.ai.difficulty = difficulty;
   state.ai.engine = engine === "proxy" ? "proxy" : "local";
+  SFX.newGame();
   renderAll();
 }
 
@@ -1351,6 +1560,7 @@ function skipSkill() {
     return;
   }
 
+  state.skill.warpSource = null;
   pushLog(`${PLAYER_LABELS[state.match.currentPlayer]} 放弃了本回合技能。`);
   setMessage("你跳过了技能窗口，回合将正常切换。");
   advanceTurn();
@@ -1412,6 +1622,7 @@ function handleGlobalKeydown(event) {
     if (state.skill.selectedSkill) {
       event.preventDefault();
       state.skill.selectedSkill = null;
+      state.skill.warpSource = null;
       setMessage("已取消技能选择。");
       renderAll();
     }
