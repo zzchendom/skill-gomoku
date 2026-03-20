@@ -13,10 +13,17 @@
 - 玩家 vs AI 模式、难度档位、思考遮罩
 - 盘面统计（黑 / 白 / 空子数）与键盘快捷键（N/U/S/Esc）
 - 玩家 vs AI 时可切换 **本地引擎** / **DeepSeek 代理**（通过自建后端转发，见下方接口约定）
+- 附带 **`proxy-server/`** 通用代理：密钥只放服务器，几个朋友共用同一代理 URL；根目录 **`config.js`** 可写默认 `defaultProxyUrl` 方便分发
+
+## 朋友共用的通用代理（小规模推荐）
+
+1. 一人按 [proxy-server/README.md](proxy-server/README.md) 部署服务，设置环境变量 `DEEPSEEK_API_KEY`；建议再加 `FRIEND_TOKEN`，避免公网被陌生人调用。
+2. 把公网地址（如 `https://你的服务/api/gomoku-move`）写进仓库里的 **`config.js`** → `defaultProxyUrl`；若启用了 `FRIEND_TOKEN`，把同一串口令写进 `defaultProxyToken`（**仅适合私有仓库或小群分发**，公开仓库不要提交 Token）。
+3. 其他人直接打开前端页面，选「玩家 vs AI」→「DeepSeek 代理」，无需再填 URL 即可走共用代理（仍可在浏览器里覆盖保存）。
 
 ## DeepSeek / 大模型代理接口（实验）
 
-前端**不会**把 DeepSeek 密钥写进仓库。请自建 HTTPS 代理，在浏览器里只填代理 URL；可选填 `Authorization: Bearer <token>` 给你自己的服务鉴权。
+前端**不会**把 DeepSeek 密钥写进仓库。可运行本仓库的 `proxy-server`，或在浏览器里填代理 URL；可选 `Authorization: Bearer <token>` 与服务器 `FRIEND_TOKEN` 一致。
 
 **请求** `POST`，`Content-Type: application/json`，示例字段：
 
