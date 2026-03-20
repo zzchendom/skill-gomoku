@@ -51,7 +51,20 @@
               </div>
             </div>
 
-            <div id="board" class="board" aria-label="技能五子棋棋盘"></div>
+            <div class="board-shell">
+              <div id="board" class="board" aria-label="技能五子棋棋盘"></div>
+              <div id="ai-thinking-layer" class="ai-thinking-layer hidden" aria-hidden="true">
+                <div class="ai-thinking-card">
+                  <div class="ai-thinking-pulse" aria-hidden="true"></div>
+                  <div class="ai-thinking-copy">
+                    <span class="ai-thinking-title">AI 演算中</span>
+                    <span class="ai-thinking-sub">
+                      本地引擎 · <span id="ai-difficulty-label">标准</span>
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
 
             <p id="message" class="message">
               先占据中心，争取做出 3 连来点亮技能面板。
@@ -62,6 +75,18 @@
         <aside class="sidebar">
           <section class="sidebar-card controls-card">
             <h2>对局控制</h2>
+            <div class="mode-switch" aria-label="对局模式切换">
+              <button id="mode-local" type="button" class="mode-button active">本地双人</button>
+              <button id="mode-ai" type="button" class="mode-button">玩家 vs AI</button>
+            </div>
+            <div id="ai-difficulty-row" class="difficulty-row" hidden>
+              <span class="difficulty-label">AI 难度</span>
+              <div class="difficulty-buttons" role="group" aria-label="AI 难度">
+                <button type="button" class="difficulty-button" data-difficulty="easy">休闲</button>
+                <button type="button" class="difficulty-button active" data-difficulty="normal">标准</button>
+                <button type="button" class="difficulty-button" data-difficulty="hard">硬核</button>
+              </div>
+            </div>
             <div class="toolbar">
               <button id="new-game" type="button">新对局</button>
               <button id="undo-move" type="button">悔棋</button>
