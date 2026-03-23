@@ -186,7 +186,7 @@
       <div id="welcome-room-panel" class="welcome-room-panel" hidden>
         <button id="room-back" type="button" class="room-back-btn">&larr; 返回</button>
         <div class="room-actions">
-          <button id="room-create" type="button" class="welcome-btn welcome-btn-create">
+          <button id="room-create" type="button" class="welcome-btn welcome-btn-create" onclick="window.skillGomokuOnlineCreate && window.skillGomokuOnlineCreate()" onpointerdown="window.skillGomokuOnlineCreatePreview && window.skillGomokuOnlineCreatePreview()">
             <span class="welcome-btn-label">创建房间</span>
             <span class="welcome-btn-desc">生成房间码，等朋友加入</span>
           </button>
@@ -194,7 +194,7 @@
             <span class="welcome-btn-label">加入房间</span>
             <div class="room-join-row">
               <input id="room-code-input" type="text" maxlength="4" placeholder="输入 4 位房间码" autocomplete="off">
-              <button id="room-join" type="button">加入</button>
+              <button id="room-join" type="button" onclick="window.skillGomokuOnlineJoin && window.skillGomokuOnlineJoin()" onpointerdown="window.skillGomokuOnlineJoinPreview && window.skillGomokuOnlineJoinPreview()">加入</button>
             </div>
           </div>
         </div>

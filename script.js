@@ -1892,6 +1892,18 @@ function reportLobbyError(message) {
   setRoomButtonLabels();
 }
 
+function previewCreateRoomClick() {
+  if (dom.roomCreate && !dom.roomCreate.disabled) {
+    setRoomStatus("已检测到点击“创建房间”，正在处理...");
+  }
+}
+
+function previewJoinRoomClick() {
+  if (dom.roomJoin && !dom.roomJoin.disabled) {
+    setRoomStatus("已检测到点击“加入”，正在处理...");
+  }
+}
+
 function disconnectOnlineSocket() {
   onlineLobby.connectPromise = null;
   onlineLobby.warmupPromise = null;
@@ -2289,6 +2301,7 @@ function bindWelcome() {
   const btnOnline = document.querySelector("#welcome-online");
   const btnAi = document.querySelector("#welcome-ai");
   const btnLocal = document.querySelector("#welcome-local");
+  const roomActions = document.querySelector(".room-actions");
 
   if (btnLocal) {
     btnLocal.addEventListener("click", () => {
@@ -2319,11 +2332,7 @@ function bindWelcome() {
   }
 
   if (dom.roomCreate) {
-    dom.roomCreate.addEventListener("pointerdown", () => {
-      if (!dom.roomCreate.disabled) {
-        setRoomStatus("已检测到点击“创建房间”，正在处理...");
-      }
-    });
+    dom.roomCreate.addEventListener("pointerdown", previewCreateRoomClick);
     dom.roomCreate.addEventListener("click", () => {
       void handleCreateRoom();
     });
@@ -2334,11 +2343,7 @@ function bindWelcome() {
       dom.roomCodeInput.value = dom.roomCodeInput.value.replace(/\D/g, "").slice(0, 4);
     });
 
-    dom.roomJoin.addEventListener("pointerdown", () => {
-      if (!dom.roomJoin.disabled) {
-        setRoomStatus("已检测到点击“加入”，正在处理...");
-      }
-    });
+    dom.roomJoin.addEventListener("pointerdown", previewJoinRoomClick);
 
     dom.roomJoin.addEventListener("click", () => {
       void handleJoinRoom();
@@ -2350,12 +2355,38 @@ function bindWelcome() {
       }
     });
   }
+
+  if (roomActions) {
+    roomActions.addEventListener("click", (event) => {
+      const target = event.target.closest("#room-create, #room-join");
+      if (!target) {
+        return;
+      }
+
+      if (target.id === "room-create") {
+        previewCreateRoomClick();
+        void handleCreateRoom();
+      } else if (target.id === "room-join") {
+        previewJoinRoomClick();
+        void handleJoinRoom();
+      }
+    });
+  }
 }
 
 window.addEventListener("error", (event) => {
   const message = event.error?.message || event.message || "未知脚本错误";
   reportLobbyError(message);
 });
+
+window.skillGomokuOnlineCreatePreview = previewCreateRoomClick;
+window.skillGomokuOnlineJoinPreview = previewJoinRoomClick;
+window.skillGomokuOnlineCreate = () => {
+  void handleCreateRoom();
+};
+window.skillGomokuOnlineJoin = () => {
+  void handleJoinRoom();
+};
 
 window.addEventListener("unhandledrejection", (event) => {
   const reason = event.reason;
