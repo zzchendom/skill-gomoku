@@ -6,7 +6,7 @@
  * 若仓库会公开，不要在此填写 FRIEND_TOKEN；可只在浏览器会话里填。
  */
 window.SKILL_GOMOKU_CONFIG = {
-  defaultProxyUrl: "",
+  defaultProxyUrl: "https://skill-gomoku-server.onrender.com/api/gomoku-move",
   defaultProxyToken: "",
-  defaultServerUrl: ""
+  defaultServerUrl: "https://skill-gomoku-server.onrender.com"
 };
