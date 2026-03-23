@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: skill-gomoku-server
+    runtime: node
+    rootDir: proxy-server
+    buildCommand: npm install
+    startCommand: node server.mjs
+    plan: free
+    envVars:
+      - key: DEEPSEEK_API_KEY
+        sync: false
+      - key: CORS_ORIGIN
+        value: "*"
+      - key: PORT
+        value: "10000"
