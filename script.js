@@ -1862,6 +1862,10 @@ function setRoomControlsDisabled(disabled) {
   if (dom.roomCodeInput) dom.roomCodeInput.disabled = disabled;
 }
 
+function setRoomJoinInputDisabled(disabled) {
+  if (dom.roomCodeInput) dom.roomCodeInput.disabled = disabled;
+}
+
 function disconnectOnlineSocket() {
   onlineLobby.connectPromise = null;
   onlineLobby.warmupPromise = null;
@@ -2076,8 +2080,7 @@ async function ensureOnlineSocket() {
     }
 
     setLobbyAction("connecting");
-    setRoomStatus("正在唤醒联机服务器，首次可能需要 10-60 秒...");
-    setRoomControlsDisabled(true);
+    setRoomStatus("正在连接联机服务器，首次可能需要 10-60 秒...");
 
     await warmUpOnlineServer();
 
@@ -2134,9 +2137,9 @@ function showRoomPanel() {
   if (dom.welcomeModeSelect) dom.welcomeModeSelect.hidden = true;
   if (dom.welcomeRoomPanel) dom.welcomeRoomPanel.hidden = false;
   if (dom.roomCodeInput) dom.roomCodeInput.value = "";
-  setRoomStatus("正在准备联机大厅...", true);
-  setRoomControlsDisabled(true);
-  setLobbyAction("connecting");
+  setRoomStatus("联机大厅已打开。你可以直接点“创建房间”，或输入房间号后点“加入”。", true);
+  setRoomControlsDisabled(false);
+  setLobbyAction("idle");
 
   void ensureOnlineSocket().catch((error) => {
     const message =
@@ -2160,15 +2163,17 @@ function showModeSelect() {
 }
 
 async function handleCreateRoom() {
-  if (!dom.roomCreate || dom.roomCreate.disabled) {
+  if (!dom.roomCreate) {
     return;
   }
 
   try {
     SFX.click();
     setLobbyAction("creating");
-    setRoomStatus("正在创建房间...");
-    setRoomControlsDisabled(true);
+    setRoomStatus("正在创建房间，若服务器刚启动可能需要等待几十秒...");
+    if (dom.roomCreate) dom.roomCreate.disabled = true;
+    if (dom.roomJoin) dom.roomJoin.disabled = true;
+    setRoomJoinInputDisabled(true);
     await ensureOnlineSocket();
     const resp = await emitSocketAck("create-room");
 
@@ -2178,6 +2183,9 @@ async function handleCreateRoom() {
 
     onlineRoomCode = resp.code;
     setLobbyAction("waiting");
+    if (dom.roomCreate) dom.roomCreate.disabled = false;
+    if (dom.roomJoin) dom.roomJoin.disabled = false;
+    setRoomJoinInputDisabled(false);
     setRoomStatus(`房间码: ${resp.code} — 你是房主，等待另一位玩家加入后将自动开始对战。`);
   } catch (error) {
     const fallbackMessage =
@@ -2196,7 +2204,7 @@ async function handleCreateRoom() {
 }
 
 async function handleJoinRoom() {
-  if (!dom.roomJoin || !dom.roomCodeInput || dom.roomJoin.disabled) {
+  if (!dom.roomJoin || !dom.roomCodeInput) {
     return;
   }
 
@@ -2210,7 +2218,9 @@ async function handleJoinRoom() {
     SFX.click();
     setLobbyAction("joining");
     setRoomStatus(`正在加入房间 ${code}...`);
-    setRoomControlsDisabled(true);
+    if (dom.roomCreate) dom.roomCreate.disabled = true;
+    if (dom.roomJoin) dom.roomJoin.disabled = true;
+    setRoomJoinInputDisabled(true);
     await ensureOnlineSocket();
     const resp = await emitSocketAck("join-room", { code });
 
@@ -2220,6 +2230,9 @@ async function handleJoinRoom() {
 
     onlineRoomCode = resp.code;
     setLobbyAction("starting");
+    if (dom.roomCreate) dom.roomCreate.disabled = false;
+    if (dom.roomJoin) dom.roomJoin.disabled = false;
+    setRoomJoinInputDisabled(false);
     setRoomStatus(`已加入房间 ${resp.code}，正在等待房主开始对战...`);
   } catch (error) {
     const fallbackMessage =
