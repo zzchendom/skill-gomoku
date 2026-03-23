@@ -1,19 +1,19 @@
 import "dotenv/config";
+import http from "node:http";
 import express from "express";
 import cors from "cors";
+import { Server as SocketServer } from "socket.io";
 
 const app = express();
 app.use(express.json({ limit: "512kb" }));
 
 const corsOrigin = process.env.CORS_ORIGIN || "*";
-app.use(
-  cors({
-    origin:
-      corsOrigin === "*"
-        ? true
-        : corsOrigin.split(",").map((s) => s.trim())
-  })
-);
+const corsOpts = {
+  origin: corsOrigin === "*" ? true : corsOrigin.split(",").map((s) => s.trim())
+};
+app.use(cors(corsOpts));
+
+/* ───────── DeepSeek AI proxy (unchanged) ───────── */
 
 const DEEPSEEK_URL = "https://api.deepseek.com/v1/chat/completions";
 const MODEL = process.env.DEEPSEEK_MODEL || "deepseek-chat";
@@ -148,8 +148,134 @@ app.post("/api/gomoku-move", async (req, res) => {
   }
 });
 
+/* ───────── WebSocket room-based multiplayer ───────── */
+
+const rooms = new Map();
+
+function generateRoomCode() {
+  let code;
+  do {
+    code = String(Math.floor(1000 + Math.random() * 9000));
+  } while (rooms.has(code));
+  return code;
+}
+
+function getRoomBySocket(socketId) {
+  for (const [code, room] of rooms) {
+    if (room.black === socketId || room.white === socketId) {
+      return { code, room };
+    }
+  }
+  return null;
+}
+
+const httpServer = http.createServer(app);
+
+const io = new SocketServer(httpServer, {
+  cors: corsOpts,
+  pingInterval: 15000,
+  pingTimeout: 10000
+});
+
+io.on("connection", (socket) => {
+  socket.on("create-room", (callback) => {
+    const existing = getRoomBySocket(socket.id);
+    if (existing) {
+      rooms.delete(existing.code);
+      socket.leave(existing.code);
+    }
+
+    const code = generateRoomCode();
+    rooms.set(code, { black: socket.id, white: null, started: false });
+    socket.join(code);
+    console.log(`[room] ${code} created by ${socket.id}`);
+    if (typeof callback === "function") callback({ code });
+  });
+
+  socket.on("join-room", (data, callback) => {
+    const code = String(data?.code || "").trim();
+    const room = rooms.get(code);
+
+    if (!room) {
+      return typeof callback === "function" && callback({ error: "房间不存在" });
+    }
+    if (room.white) {
+      return typeof callback === "function" && callback({ error: "房间已满" });
+    }
+    if (room.black === socket.id) {
+      return typeof callback === "function" && callback({ error: "不能加入自己的房间" });
+    }
+
+    room.white = socket.id;
+    room.started = true;
+    socket.join(code);
+    console.log(`[room] ${code} joined by ${socket.id}`);
+
+    io.to(room.black).emit("opponent-joined", { color: "black" });
+
+    if (typeof callback === "function") callback({ code, color: "white" });
+  });
+
+  socket.on("place-stone", (data) => {
+    const found = getRoomBySocket(socket.id);
+    if (!found || !found.room.started) return;
+
+    io.to(found.code).emit("stone-placed", {
+      row: data.row,
+      col: data.col,
+      player: socket.id === found.room.black ? "black" : "white"
+    });
+  });
+
+  socket.on("use-skill", (data) => {
+    const found = getRoomBySocket(socket.id);
+    if (!found || !found.room.started) return;
+
+    io.to(found.code).emit("skill-used", {
+      skillId: data.skillId,
+      row: data.row,
+      col: data.col,
+      warpSource: data.warpSource || null,
+      player: socket.id === found.room.black ? "black" : "white"
+    });
+  });
+
+  socket.on("skip-skill", () => {
+    const found = getRoomBySocket(socket.id);
+    if (!found || !found.room.started) return;
+
+    io.to(found.code).emit("skill-skipped", {
+      player: socket.id === found.room.black ? "black" : "white"
+    });
+  });
+
+  socket.on("new-game-request", () => {
+    const found = getRoomBySocket(socket.id);
+    if (!found || !found.room.started) return;
+
+    io.to(found.code).emit("new-game-sync");
+  });
+
+  socket.on("disconnect", () => {
+    const found = getRoomBySocket(socket.id);
+    if (!found) return;
+
+    const { code, room } = found;
+    const opponentId = room.black === socket.id ? room.white : room.black;
+
+    if (opponentId) {
+      io.to(opponentId).emit("opponent-disconnected");
+    }
+
+    rooms.delete(code);
+    console.log(`[room] ${code} dissolved (disconnect)`);
+  });
+});
+
+/* ───────── Start ───────── */
+
 const PORT = Number(process.env.PORT) || 8787;
-app.listen(PORT, () => {
-  console.log(`skill-gomoku proxy listening on http://127.0.0.1:${PORT}`);
-  console.log("POST /api/gomoku-move  |  GET /health");
+httpServer.listen(PORT, () => {
+  console.log(`skill-gomoku server listening on http://127.0.0.1:${PORT}`);
+  console.log("POST /api/gomoku-move  |  GET /health  |  WebSocket rooms");
 });
