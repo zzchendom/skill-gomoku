@@ -109,10 +109,6 @@
                 <button type="button" id="engine-proxy" class="engine-button">DeepSeek 代理</button>
               </div>
               <div id="ai-proxy-panel" class="ai-proxy-panel hidden">
-                <p class="proxy-hint">
-                  浏览器不保存 DeepSeek 密钥。几个朋友可共用<strong>同一台</strong>代理服务（见仓库 <code>proxy-server</code>），密钥只放在服务器。
-                  也可在 <code>config.js</code> 里写默认代理 URL，大家拉同一份前端即可。
-                </p>
                 <label class="proxy-field">
                   <span>代理 URL</span>
                   <input id="proxy-url" type="url" autocomplete="off" placeholder="https://你的域名/api/gomoku-move">
@@ -153,7 +149,7 @@
               <li>棋盘为 15x15，双方轮流落子，先形成 5 连的一方获胜。</li>
               <li>本回合新形成 3 连会触发小技能，本回合新形成 4 连会触发大技能。</li>
               <li>每回合最多触发 1 次技能，技能造成的变化不会在本回合直接判胜。</li>
-              <li>技能池：封锁、冲击、传送（小技能）；爆破、转化、虹吸（大技能）。</li>
+              <li>技能池：玄封、飞沙走石、缩地成寸（小技能）；天崩地裂、移花接木、鲲鹏吞噬（大技能）。</li>
               <li>玩家 vs AI 模式下可选择「DeepSeek 代理」：由你的后端转发大模型，接口约定见 README。</li>
               <li>键盘：<kbd>N</kbd> 新对局、<kbd>U</kbd> 悔棋、<kbd>S</kbd> 跳过技能、<kbd>Esc</kbd> 取消技能选择。</li>
             </ul>
@@ -207,6 +203,16 @@
           <span id="room-status-text">等待对手加入...</span>
         </div>
       </div>
+    </div>
+  </div>
+
+  <div id="skill-modal" class="modal hidden" aria-hidden="true">
+    <div class="modal-card skill-modal-card">
+      <p class="eyebrow" id="skill-modal-tier">灵技已就绪</p>
+      <h2 id="skill-modal-title">选择本回合技能</h2>
+      <p class="modal-text" id="skill-modal-desc">你形成了连段，可释放一项技能改变局势——或选择蓄力跳过。</p>
+      <div id="skill-modal-buttons" class="skill-modal-buttons"></div>
+      <button id="skill-modal-skip" type="button" class="skill-modal-skip">不使用技能</button>
     </div>
   </div>
 

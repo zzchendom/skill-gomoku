@@ -1286,3 +1286,61 @@ body[data-turn="white"] .player-badge-white.active {
     width: 100%;
   }
 }
+
+.skill-modal-card {
+  width: min(520px, 100%);
+  animation: welcomeIn 0.35s ease;
+}
+
+.skill-modal-buttons {
+  display: grid;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.skill-modal-buttons .skill-button {
+  width: 100%;
+  text-align: left;
+  padding: 16px 18px;
+  border-radius: 16px;
+  background: rgba(15, 20, 44, 0.95);
+  border: 1px solid rgba(167, 181, 255, 0.18);
+  box-shadow: none;
+  cursor: pointer;
+  transition: border-color 180ms ease, box-shadow 180ms ease, transform 180ms ease;
+}
+
+.skill-modal-buttons .skill-button:hover {
+  transform: translateY(-2px);
+  border-color: rgba(125, 255, 188, 0.5);
+  box-shadow: 0 0 24px rgba(125, 255, 188, 0.14);
+}
+
+.skill-modal-buttons .skill-button strong {
+  display: block;
+  font-size: 1.05rem;
+  margin-bottom: 4px;
+}
+
+.skill-modal-buttons .skill-button span {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+
+.skill-modal-skip {
+  margin-top: 14px;
+  width: 100%;
+  padding: 12px;
+  border-radius: 14px;
+  background: rgba(21, 28, 58, 0.96);
+  border: 1px solid rgba(167, 181, 255, 0.14);
+  box-shadow: none;
+  color: var(--text-muted);
+  font-size: 0.92rem;
+}
+
+.skill-modal-skip:hover {
+  border-color: rgba(255, 99, 146, 0.4);
+  color: var(--text-main);
+}
