@@ -145,6 +145,9 @@ const DIFFICULTY_LABELS = {
 
 const STORAGE_PROXY_URL = "skill-gomoku-ai-proxy-url";
 const STORAGE_PROXY_TOKEN = "skill-gomoku-ai-proxy-token";
+const ROOM_ACK_TIMEOUT_MS = 20000;
+const ONLINE_SERVER_WAKE_TIMEOUT_MS = 65000;
+const ONLINE_SERVER_WAKE_RETRY_MS = 2500;
 
 function getDefaultProxyUrl() {
   return (
@@ -186,6 +189,11 @@ function getServerUrl() {
 let onlineSocket = null;
 let onlineColor = null;
 let onlineRoomCode = null;
+const onlineLobby = {
+  action: "idle",
+  connectPromise: null,
+  warmupPromise: null
+};
 
 const dom = {
   board: document.querySelector("#board"),
@@ -219,7 +227,16 @@ const dom = {
   winnerModal: document.querySelector("#winner-modal"),
   winnerTitle: document.querySelector("#winner-title"),
   winnerText: document.querySelector("#winner-text"),
-  modalNewGame: document.querySelector("#modal-new-game")
+  modalNewGame: document.querySelector("#modal-new-game"),
+  welcomeModal: document.querySelector("#welcome-modal"),
+  welcomeModeSelect: document.querySelector("#welcome-mode-select"),
+  welcomeRoomPanel: document.querySelector("#welcome-room-panel"),
+  roomBack: document.querySelector("#room-back"),
+  roomCreate: document.querySelector("#room-create"),
+  roomJoin: document.querySelector("#room-join"),
+  roomCodeInput: document.querySelector("#room-code-input"),
+  roomStatus: document.querySelector("#room-status"),
+  roomStatusText: document.querySelector("#room-status-text")
 };
 
 let state = createInitialState();
@@ -1783,6 +1800,15 @@ function dismissWelcome(mode) {
 }
 
 function startOnlineGame(color, roomCode) {
+  if (
+    state.online.enabled &&
+    state.online.myColor === color &&
+    state.online.roomCode === roomCode
+  ) {
+    return;
+  }
+
+  setLobbyAction("playing");
   hideWelcomeModal();
   state = createInitialState("online");
   state.online.myColor = color;
@@ -1815,55 +1841,168 @@ function emitSkill(skillId, row, col) {
   }
 }
 
-function connectSocket(onConnect, onFail) {
-  const url = getServerUrl();
-  if (!url) {
-    setRoomStatus("未配置服务器地址，请检查 config.js");
-    if (onFail) onFail();
-    return;
-  }
+function waitMs(ms) {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
+}
+
+function setLobbyAction(action) {
+  onlineLobby.action = action;
+}
+
+function setRoomStatus(text, show = true) {
+  if (dom.roomStatus) dom.roomStatus.hidden = !show;
+  if (dom.roomStatusText) dom.roomStatusText.textContent = text;
+}
+
+function setRoomControlsDisabled(disabled) {
+  if (dom.roomCreate) dom.roomCreate.disabled = disabled;
+  if (dom.roomJoin) dom.roomJoin.disabled = disabled;
+  if (dom.roomCodeInput) dom.roomCodeInput.disabled = disabled;
+}
+
+function disconnectOnlineSocket() {
+  onlineLobby.connectPromise = null;
+  onlineLobby.warmupPromise = null;
+  setLobbyAction("idle");
+  onlineColor = null;
+  onlineRoomCode = null;
 
   if (onlineSocket) {
     onlineSocket.disconnect();
     onlineSocket = null;
   }
+}
 
-  setRoomStatus("正在唤醒服务器，首次可能需要 30-60 秒...");
+function ensureSocketLibrary() {
+  if (typeof window.io !== "function") {
+    throw new Error("socket_library_missing");
+  }
+}
 
-  let settled = false;
+async function warmUpOnlineServer() {
+  if (onlineLobby.warmupPromise) {
+    return onlineLobby.warmupPromise;
+  }
 
-  onlineSocket = io(url, {
-    transports: ["polling", "websocket"],
-    timeout: 90000,
-    reconnection: false
+  const url = getServerUrl();
+  if (!url) {
+    throw new Error("missing_server_url");
+  }
+
+  const healthUrl = `${url.replace(/\/$/, "")}/health`;
+
+  onlineLobby.warmupPromise = (async () => {
+    const deadline = Date.now() + ONLINE_SERVER_WAKE_TIMEOUT_MS;
+    let lastError = null;
+
+    while (Date.now() < deadline) {
+      try {
+        const response = await fetch(healthUrl, {
+          method: "GET",
+          cache: "no-store"
+        });
+
+        if (response.ok) {
+          return;
+        }
+
+        lastError = new Error(`health_http_${response.status}`);
+      } catch (error) {
+        lastError = error;
+      }
+
+      await waitMs(ONLINE_SERVER_WAKE_RETRY_MS);
+    }
+
+    throw lastError || new Error("server_wakeup_timeout");
+  })();
+
+  try {
+    await onlineLobby.warmupPromise;
+  } finally {
+    onlineLobby.warmupPromise = null;
+  }
+}
+
+function emitSocketAck(eventName, payload, timeoutMs = ROOM_ACK_TIMEOUT_MS) {
+  return new Promise((resolve, reject) => {
+    if (!onlineSocket) {
+      reject(new Error("socket_not_connected"));
+      return;
+    }
+
+    let settled = false;
+    const timeoutId = window.setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      reject(new Error("socket_ack_timeout"));
+    }, timeoutMs);
+
+    const cleanup = () => {
+      window.clearTimeout(timeoutId);
+    };
+
+    const handleAck = (resp) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve(resp || {});
+    };
+
+    try {
+      if (typeof payload === "undefined") {
+        onlineSocket.emit(eventName, handleAck);
+      } else {
+        onlineSocket.emit(eventName, payload, handleAck);
+      }
+    } catch (error) {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(error);
+    }
+  });
+}
+
+function bindOnlineSocketEvents(socket) {
+  socket.on("connect", () => {
+    if (!state.online.enabled) {
+      if (onlineLobby.action === "connecting") {
+        setLobbyAction("ready");
+        setRoomStatus("已连接联机服务器，可以创建房间或输入房间号加入。");
+        setRoomControlsDisabled(false);
+      } else if (onlineLobby.action === "reconnecting") {
+        setLobbyAction("ready");
+        setRoomStatus("联机服务器已重新连接。");
+        setRoomControlsDisabled(false);
+      }
+    }
   });
 
-  onlineSocket.on("connect", () => {
-    if (settled) return;
-    settled = true;
-    setRoomStatus("已连接，正在创建房间...");
-    if (onConnect) onConnect();
-  });
-
-  onlineSocket.on("connect_error", (err) => {
-    if (settled) return;
-    settled = true;
-    setRoomStatus("连接失败：" + (err.message || "网络异常") + "，请重试");
-    if (onFail) onFail();
-  });
-
-  onlineSocket.on("opponent-joined", (data) => {
+  socket.on("game-started", (data) => {
+    setLobbyAction("starting");
+    setRoomStatus("房间已就绪，正在进入对战...", true);
     SFX.newGame();
-    startOnlineGame(data.color, onlineRoomCode);
+    startOnlineGame(data.color, data.code || onlineRoomCode);
   });
 
-  onlineSocket.on("stone-placed", (data) => {
+  socket.on("opponent-joined", (data) => {
+    onlineRoomCode = data.code || onlineRoomCode;
+    if (!state.online.enabled) {
+      setLobbyAction("starting");
+      setRoomStatus(`玩家已加入房间 ${onlineRoomCode}，正在开始对战...`);
+    }
+  });
+
+  socket.on("stone-placed", (data) => {
     if (state.match.status === "finished") return;
     if (state.board.cells[data.row][data.col]) return;
     placeStone(data.row, data.col);
   });
 
-  onlineSocket.on("skill-used", (data) => {
+  socket.on("skill-used", (data) => {
     if (state.match.status === "finished") return;
     if (data.warpSource) {
       state.skill.warpSource = data.warpSource;
@@ -1872,45 +2011,229 @@ function connectSocket(onConnect, onFail) {
     tryApplySkill(data.row, data.col);
   });
 
-  onlineSocket.on("skill-skipped", () => {
+  socket.on("skill-skipped", () => {
     if (state.match.status === "finished") return;
     doSkipSkill();
   });
 
-  onlineSocket.on("new-game-sync", () => {
+  socket.on("new-game-sync", () => {
     doResetGame();
   });
 
-  onlineSocket.on("opponent-disconnected", () => {
+  socket.on("opponent-disconnected", () => {
+    if (!state.online.enabled) {
+      setLobbyAction("ready");
+      setRoomStatus("对手已离开，房间已失效，请重新创建或加入。");
+      setRoomControlsDisabled(false);
+      return;
+    }
+
     pushLog("对手已断开连接。");
     setMessage("对手已离开房间，对局中断。");
     renderAll();
   });
+
+  socket.on("disconnect", (reason) => {
+    onlineLobby.connectPromise = null;
+
+    if (reason === "io client disconnect") {
+      return;
+    }
+
+    if (!state.online.enabled && dom.welcomeRoomPanel && !dom.welcomeRoomPanel.hidden) {
+      setLobbyAction("reconnecting");
+      setRoomStatus("联机连接已断开，请稍候后重试创建/加入房间。");
+      setRoomControlsDisabled(false);
+      return;
+    }
+
+    if (state.online.enabled) {
+      pushLog(`联机连接已断开：${reason}`);
+      setMessage("联机连接已断开，请返回房间面板后重新进入。");
+      renderAll();
+    }
+  });
 }
 
-function setRoomStatus(text, show = true) {
-  const el = document.querySelector("#room-status");
-  const textEl = document.querySelector("#room-status-text");
-  if (el) el.hidden = !show;
-  if (textEl) textEl.textContent = text;
+async function ensureOnlineSocket() {
+  ensureSocketLibrary();
+
+  if (onlineSocket?.connected) {
+    setLobbyAction("ready");
+    setRoomStatus("已连接联机服务器，可以创建房间或输入房间号加入。");
+    setRoomControlsDisabled(false);
+    return onlineSocket;
+  }
+
+  if (onlineLobby.connectPromise) {
+    return onlineLobby.connectPromise;
+  }
+
+  onlineLobby.connectPromise = (async () => {
+    const url = getServerUrl();
+    if (!url) {
+      throw new Error("missing_server_url");
+    }
+
+    setLobbyAction("connecting");
+    setRoomStatus("正在唤醒联机服务器，首次可能需要 10-60 秒...");
+    setRoomControlsDisabled(true);
+
+    await warmUpOnlineServer();
+
+    if (onlineSocket) {
+      onlineSocket.disconnect();
+      onlineSocket = null;
+    }
+
+    const socket = window.io(url, {
+      transports: ["websocket", "polling"],
+      timeout: 20000,
+      reconnection: true,
+      reconnectionAttempts: 3,
+      reconnectionDelay: 1500
+    });
+
+    bindOnlineSocketEvents(socket);
+    onlineSocket = socket;
+
+    await new Promise((resolve, reject) => {
+      const cleanup = () => {
+        socket.off("connect", handleConnect);
+        socket.off("connect_error", handleError);
+      };
+
+      const handleConnect = () => {
+        cleanup();
+        resolve();
+      };
+
+      const handleError = (error) => {
+        cleanup();
+        reject(error || new Error("socket_connect_error"));
+      };
+
+      socket.once("connect", handleConnect);
+      socket.once("connect_error", handleError);
+    });
+
+    setLobbyAction("ready");
+    setRoomStatus("已连接联机服务器，可以创建房间或输入房间号加入。");
+    setRoomControlsDisabled(false);
+    return socket;
+  })();
+
+  try {
+    return await onlineLobby.connectPromise;
+  } finally {
+    onlineLobby.connectPromise = null;
+  }
 }
 
 function showRoomPanel() {
-  const modeSelect = document.querySelector("#welcome-mode-select");
-  const roomPanel = document.querySelector("#welcome-room-panel");
-  if (modeSelect) modeSelect.hidden = true;
-  if (roomPanel) roomPanel.hidden = false;
+  if (dom.welcomeModeSelect) dom.welcomeModeSelect.hidden = true;
+  if (dom.welcomeRoomPanel) dom.welcomeRoomPanel.hidden = false;
+  if (dom.roomCodeInput) dom.roomCodeInput.value = "";
+  setRoomStatus("正在准备联机大厅...", true);
+  setRoomControlsDisabled(true);
+  setLobbyAction("connecting");
+
+  void ensureOnlineSocket().catch((error) => {
+    const message =
+      error?.message === "socket_library_missing"
+        ? "联机脚本加载失败，请刷新页面后重试。"
+        : error?.message === "missing_server_url"
+          ? "未配置联机服务器地址，请检查 config.js。"
+          : "联机服务器暂时不可用，请稍后再试。";
+
+    setLobbyAction("idle");
+    setRoomStatus(message);
+    setRoomControlsDisabled(false);
+  });
 }
 
 function showModeSelect() {
-  const modeSelect = document.querySelector("#welcome-mode-select");
-  const roomPanel = document.querySelector("#welcome-room-panel");
-  if (modeSelect) modeSelect.hidden = false;
-  if (roomPanel) roomPanel.hidden = true;
+  if (dom.welcomeModeSelect) dom.welcomeModeSelect.hidden = false;
+  if (dom.welcomeRoomPanel) dom.welcomeRoomPanel.hidden = true;
   setRoomStatus("", false);
-  if (onlineSocket) {
-    onlineSocket.disconnect();
-    onlineSocket = null;
+  disconnectOnlineSocket();
+}
+
+async function handleCreateRoom() {
+  if (!dom.roomCreate || dom.roomCreate.disabled) {
+    return;
+  }
+
+  try {
+    SFX.click();
+    setLobbyAction("creating");
+    setRoomStatus("正在创建房间...");
+    setRoomControlsDisabled(true);
+    await ensureOnlineSocket();
+    const resp = await emitSocketAck("create-room");
+
+    if (resp.error) {
+      throw new Error(resp.error);
+    }
+
+    onlineRoomCode = resp.code;
+    setLobbyAction("waiting");
+    setRoomStatus(`房间码: ${resp.code} — 你是房主，等待另一位玩家加入后将自动开始对战。`);
+  } catch (error) {
+    const fallbackMessage =
+      error?.message === "socket_library_missing"
+        ? "联机脚本加载失败，请刷新页面后重试。"
+        : error?.message === "socket_ack_timeout"
+          ? "创建房间超时，请稍后重试。"
+          : error?.message === "missing_server_url"
+            ? "未配置联机服务器地址，请检查 config.js。"
+            : error?.message || "创建房间失败，请稍后重试。";
+
+    setLobbyAction("ready");
+    setRoomStatus(fallbackMessage);
+    setRoomControlsDisabled(false);
+  }
+}
+
+async function handleJoinRoom() {
+  if (!dom.roomJoin || !dom.roomCodeInput || dom.roomJoin.disabled) {
+    return;
+  }
+
+  const code = dom.roomCodeInput.value.trim();
+  if (code.length !== 4) {
+    setRoomStatus("请输入 4 位房间码");
+    return;
+  }
+
+  try {
+    SFX.click();
+    setLobbyAction("joining");
+    setRoomStatus(`正在加入房间 ${code}...`);
+    setRoomControlsDisabled(true);
+    await ensureOnlineSocket();
+    const resp = await emitSocketAck("join-room", { code });
+
+    if (resp.error) {
+      throw new Error(resp.error);
+    }
+
+    onlineRoomCode = resp.code;
+    setLobbyAction("starting");
+    setRoomStatus(`已加入房间 ${resp.code}，正在等待房主开始对战...`);
+  } catch (error) {
+    const fallbackMessage =
+      error?.message === "socket_library_missing"
+        ? "联机脚本加载失败，请刷新页面后重试。"
+        : error?.message === "socket_ack_timeout"
+          ? "加入房间超时，请检查房间号或稍后重试。"
+          : error?.message === "missing_server_url"
+            ? "未配置联机服务器地址，请检查 config.js。"
+            : error?.message || "加入房间失败，请稍后重试。";
+
+    setLobbyAction("ready");
+    setRoomStatus(fallbackMessage);
+    setRoomControlsDisabled(false);
   }
 }
 
@@ -1918,10 +2241,6 @@ function bindWelcome() {
   const btnOnline = document.querySelector("#welcome-online");
   const btnAi = document.querySelector("#welcome-ai");
   const btnLocal = document.querySelector("#welcome-local");
-  const btnBack = document.querySelector("#room-back");
-  const btnCreate = document.querySelector("#room-create");
-  const btnJoin = document.querySelector("#room-join");
-  const inputCode = document.querySelector("#room-code-input");
 
   if (btnLocal) {
     btnLocal.addEventListener("click", () => {
@@ -1944,65 +2263,32 @@ function bindWelcome() {
     });
   }
 
-  if (btnBack) {
-    btnBack.addEventListener("click", () => {
+  if (dom.roomBack) {
+    dom.roomBack.addEventListener("click", () => {
       SFX.click();
       showModeSelect();
     });
   }
 
-  if (btnCreate) {
-    btnCreate.addEventListener("click", () => {
-      if (btnCreate.disabled) return;
-      SFX.click();
-      btnCreate.disabled = true;
-      connectSocket(
-        () => {
-          onlineSocket.emit("create-room", (resp) => {
-            btnCreate.disabled = false;
-            if (resp.error) {
-              setRoomStatus(resp.error);
-              return;
-            }
-            onlineRoomCode = resp.code;
-            setRoomStatus(`房间码: ${resp.code} — 把这个码发给朋友，等待加入...`);
-          });
-        },
-        () => { btnCreate.disabled = false; }
-      );
+  if (dom.roomCreate) {
+    dom.roomCreate.addEventListener("click", () => {
+      void handleCreateRoom();
     });
   }
 
-  if (btnJoin && inputCode) {
-    const doJoin = () => {
-      const code = inputCode.value.trim();
-      if (code.length !== 4) {
-        setRoomStatus("请输入 4 位房间码");
-        return;
-      }
-      if (btnJoin.disabled) return;
-      SFX.click();
-      btnJoin.disabled = true;
-      connectSocket(
-        () => {
-          onlineSocket.emit("join-room", { code }, (resp) => {
-            btnJoin.disabled = false;
-            if (resp.error) {
-              setRoomStatus(resp.error);
-              return;
-            }
-            onlineRoomCode = resp.code;
-            SFX.newGame();
-            startOnlineGame(resp.color, resp.code);
-          });
-        },
-        () => { btnJoin.disabled = false; }
-      );
-    };
+  if (dom.roomJoin && dom.roomCodeInput) {
+    dom.roomCodeInput.addEventListener("input", () => {
+      dom.roomCodeInput.value = dom.roomCodeInput.value.replace(/\D/g, "").slice(0, 4);
+    });
 
-    btnJoin.addEventListener("click", doJoin);
-    inputCode.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") doJoin();
+    dom.roomJoin.addEventListener("click", () => {
+      void handleJoinRoom();
+    });
+
+    dom.roomCodeInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        void handleJoinRoom();
+      }
     });
   }
 }
@@ -2044,7 +2330,7 @@ function showSkillModal(tier) {
 
   skipBtn.onclick = () => {
     hideSkillModal();
-    doSkipSkill();
+    skipSkill();
   };
 
   modal.classList.remove("hidden");

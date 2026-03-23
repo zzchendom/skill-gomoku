@@ -166,13 +166,54 @@ function generateRoomCode() {
   return code;
 }
 
-function getRoomBySocket(socketId) {
-  for (const [code, room] of rooms) {
-    if (room.black === socketId || room.white === socketId) {
-      return { code, room };
-    }
+function getRoomBySocket(socket) {
+  const code = socket.data.roomCode;
+  if (!code) return null;
+
+  const room = rooms.get(code);
+  if (!room) return null;
+
+  return { code, room };
+}
+
+function bindSocketToRoom(socket, code, role) {
+  socket.data.roomCode = code;
+  socket.data.roomRole = role;
+  socket.join(code);
+}
+
+function clearSocketRoom(socket) {
+  socket.data.roomCode = null;
+  socket.data.roomRole = null;
+}
+
+function leaveCurrentRoom(socket, notifyOpponent = true) {
+  const found = getRoomBySocket(socket);
+  if (!found) {
+    clearSocketRoom(socket);
+    return;
   }
-  return null;
+
+  const { code, room } = found;
+  const isBlack = room.black === socket.id;
+  const isWhite = room.white === socket.id;
+
+  if (!isBlack && !isWhite) {
+    socket.leave(code);
+    clearSocketRoom(socket);
+    return;
+  }
+
+  const opponentId = isBlack ? room.white : room.black;
+  socket.leave(code);
+  clearSocketRoom(socket);
+  rooms.delete(code);
+
+  if (notifyOpponent && opponentId) {
+    io.to(opponentId).emit("opponent-disconnected");
+  }
+
+  console.log(`[room] ${code} dissolved`);
 }
 
 const httpServer = http.createServer(app);
@@ -185,15 +226,11 @@ const io = new SocketServer(httpServer, {
 
 io.on("connection", (socket) => {
   socket.on("create-room", (callback) => {
-    const existing = getRoomBySocket(socket.id);
-    if (existing) {
-      rooms.delete(existing.code);
-      socket.leave(existing.code);
-    }
+    leaveCurrentRoom(socket);
 
     const code = generateRoomCode();
     rooms.set(code, { black: socket.id, white: null, started: false });
-    socket.join(code);
+    bindSocketToRoom(socket, code, "black");
     console.log(`[room] ${code} created by ${socket.id}`);
     if (typeof callback === "function") callback({ code });
   });
@@ -212,18 +249,23 @@ io.on("connection", (socket) => {
       return typeof callback === "function" && callback({ error: "不能加入自己的房间" });
     }
 
+    leaveCurrentRoom(socket);
     room.white = socket.id;
     room.started = true;
-    socket.join(code);
+    bindSocketToRoom(socket, code, "white");
     console.log(`[room] ${code} joined by ${socket.id}`);
 
-    io.to(room.black).emit("opponent-joined", { color: "black" });
+    io.to(room.black).emit("opponent-joined", { color: "black", code });
+    io.to(room.black).emit("game-started", { color: "black", code });
+    io.to(room.white).emit("game-started", { color: "white", code });
 
-    if (typeof callback === "function") callback({ code, color: "white" });
+    if (typeof callback === "function") {
+      callback({ code, color: "white", waitForStart: true });
+    }
   });
 
   socket.on("place-stone", (data) => {
-    const found = getRoomBySocket(socket.id);
+    const found = getRoomBySocket(socket);
     if (!found || !found.room.started) return;
 
     io.to(found.code).emit("stone-placed", {
@@ -234,7 +276,7 @@ io.on("connection", (socket) => {
   });
 
   socket.on("use-skill", (data) => {
-    const found = getRoomBySocket(socket.id);
+    const found = getRoomBySocket(socket);
     if (!found || !found.room.started) return;
 
     io.to(found.code).emit("skill-used", {
@@ -247,7 +289,7 @@ io.on("connection", (socket) => {
   });
 
   socket.on("skip-skill", () => {
-    const found = getRoomBySocket(socket.id);
+    const found = getRoomBySocket(socket);
     if (!found || !found.room.started) return;
 
     io.to(found.code).emit("skill-skipped", {
@@ -256,25 +298,14 @@ io.on("connection", (socket) => {
   });
 
   socket.on("new-game-request", () => {
-    const found = getRoomBySocket(socket.id);
+    const found = getRoomBySocket(socket);
     if (!found || !found.room.started) return;
 
     io.to(found.code).emit("new-game-sync");
   });
 
   socket.on("disconnect", () => {
-    const found = getRoomBySocket(socket.id);
-    if (!found) return;
-
-    const { code, room } = found;
-    const opponentId = room.black === socket.id ? room.white : room.black;
-
-    if (opponentId) {
-      io.to(opponentId).emit("opponent-disconnected");
-    }
-
-    rooms.delete(code);
-    console.log(`[room] ${code} dissolved (disconnect)`);
+    leaveCurrentRoom(socket);
   });
 });
 
