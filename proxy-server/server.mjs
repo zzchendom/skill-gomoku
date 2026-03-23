@@ -57,6 +57,12 @@ function validateMove(data, legalMoves) {
   return ok ? { row, col } : null;
 }
 
+app.get("/", (_req, res) => {
+  res.send(`<h2 style="font-family:sans-serif">Skill Gomoku Server</h2>
+<p>This is the backend server. Go play at:
+<a href="https://zzchendom.github.io/skill-gomoku/">https://zzchendom.github.io/skill-gomoku/</a></p>`);
+});
+
 app.get("/health", (_req, res) => {
   res.json({ ok: true, service: "skill-gomoku-proxy" });
 });
