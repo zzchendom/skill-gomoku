@@ -90,38 +90,38 @@ const SKILLS = {
   block: {
     id: "block",
     tier: "small",
-    name: "封锁",
-    description: "封印一个空格，使对手在下一手无法落子到该位置。"
+    name: "玄封",
+    description: "以上古封印之术禁锢一处空位，对手下一手不可落于此。"
   },
   shock: {
     id: "shock",
     tier: "small",
-    name: "冲击",
-    description: "推动一枚紧邻本回合落点的敌子 1 格，若前方无空位则失效。"
+    name: "飞沙走石",
+    description: "掀起狂沙，将紧邻落点的一枚敌子击退一格；前方无空位则无效。"
   },
   warp: {
     id: "warp",
     tier: "small",
-    name: "传送",
-    description: "将一枚紧邻本回合落点的己方棋子传送到棋盘任意空位。"
+    name: "缩地成寸",
+    description: "道家神通——将紧邻落点的一枚己子瞬移至棋盘任意空位。"
   },
   blast: {
     id: "blast",
     tier: "large",
-    name: "爆破",
-    description: "清除目标十字范围内的敌子，制造战场空洞。"
+    name: "天崩地裂",
+    description: "共工之怒，十字范围内一切敌子尽数崩灭。"
   },
   convert: {
     id: "convert",
     tier: "large",
-    name: "转化",
-    description: "转化一枚紧邻本回合落点的敌子，但本回合不会因此直接判胜。"
+    name: "移花接木",
+    description: "阴阳化转，将紧邻落点的一枚敌子化为己方棋子；本回合不直接判胜。"
   },
   siphon: {
     id: "siphon",
     tier: "large",
-    name: "虹吸",
-    description: "选择一个中心点，吸收其菱形 2 格范围内所有敌子并移除。"
+    name: "鲲鹏吞噬",
+    description: "鲲鹏展翅，菱形两格范围内所有敌子被吞入虚空。"
   }
 };
 
@@ -264,7 +264,7 @@ function createInitialState(mode = "local-pvp") {
       thinking: false,
       timerId: null,
       difficulty: "normal",
-      engine: "local"
+      engine: getDefaultProxyUrl() ? "proxy" : "local"
     },
     online: {
       enabled: mode === "online",
@@ -481,7 +481,8 @@ function renderStatus() {
   }
 
   if (dom.aiEngineRow) {
-    dom.aiEngineRow.hidden = !state.ai.enabled;
+    const hasDefaultProxy = Boolean(getDefaultProxyUrl());
+    dom.aiEngineRow.hidden = !state.ai.enabled || hasDefaultProxy;
   }
 
   if (dom.engineLocal && dom.engineProxy) {
@@ -923,8 +924,11 @@ function scoreAIMove(row, col) {
 
 function getAIThinkDelayMs() {
   const difficulty = state.ai.difficulty in DIFFICULTY_LABELS ? state.ai.difficulty : "normal";
-  const base = { easy: 1180, normal: 760, hard: 520 }[difficulty];
-  const jitter = { easy: 520, normal: 320, hard: 200 }[difficulty];
+  if (state.ai.engine === "proxy") {
+    return 80 + Math.random() * 60;
+  }
+  const base = { easy: 380, normal: 220, hard: 120 }[difficulty];
+  const jitter = { easy: 180, normal: 100, hard: 60 }[difficulty];
 
   return base + Math.random() * jitter;
 }
@@ -1271,13 +1275,14 @@ function placeStone(row, col) {
 
     const triggerText =
       result.tier === "small" ? "新形成 3 连，小技能已点亮。" : "新形成 4 连，大技能已点亮。";
-    setMessage(`${triggerText} 你可以从右侧技能栏中选择一项技能，或点击“跳过技能”。`);
+    setMessage(`${triggerText} 请在弹窗中选择技能。`);
     pushLog(
       `${PLAYER_LABELS[currentPlayer]} 触发了${result.tier === "small" ? "小技能" : "大技能"}窗口。`
     );
     SFX.trigger();
     queueEffect(result.cells, "burst");
     renderAll();
+    showSkillModal(result.tier);
     return;
   }
 
@@ -1974,6 +1979,57 @@ function bindWelcome() {
       if (e.key === "Enter") doJoin();
     });
   }
+}
+
+function showSkillModal(tier) {
+  if (state.ai.enabled && state.match.currentPlayer === "white") return;
+  if (state.online.enabled && state.match.currentPlayer !== state.online.myColor) return;
+
+  const modal = document.getElementById("skill-modal");
+  const titleEl = document.getElementById("skill-modal-title");
+  const tierEl = document.getElementById("skill-modal-tier");
+  const descEl = document.getElementById("skill-modal-desc");
+  const btnContainer = document.getElementById("skill-modal-buttons");
+  const skipBtn = document.getElementById("skill-modal-skip");
+
+  if (!modal) return;
+
+  tierEl.textContent = tier === "small" ? "小技能已就绪" : "大技能已就绪";
+  titleEl.textContent = tier === "small" ? "三连成势 — 灵技解封" : "四连惊天 — 神技降世";
+  descEl.textContent = "选择一项技能改变局势，或蓄力跳过。";
+  btnContainer.innerHTML = "";
+
+  const options = getSkillOptions();
+  options.forEach((skill) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "skill-button";
+    btn.innerHTML = `<strong>${skill.name}</strong><span>${skill.description}</span>`;
+    btn.addEventListener("click", () => {
+      hideSkillModal();
+      state.skill.selectedSkill = skill.id;
+      state.skill.warpSource = null;
+      SFX.click();
+      setMessage(`已选择「${skill.name}」，请点击棋盘上的有效目标。`);
+      renderAll();
+    });
+    btnContainer.appendChild(btn);
+  });
+
+  skipBtn.onclick = () => {
+    hideSkillModal();
+    doSkipSkill();
+  };
+
+  modal.classList.remove("hidden");
+  modal.setAttribute("aria-hidden", "false");
+}
+
+function hideSkillModal() {
+  const modal = document.getElementById("skill-modal");
+  if (!modal) return;
+  modal.classList.add("hidden");
+  modal.setAttribute("aria-hidden", "true");
 }
 
 bindEvents();
