@@ -7,5 +7,6 @@
  */
 window.SKILL_GOMOKU_CONFIG = {
   defaultProxyUrl: "",
-  defaultProxyToken: ""
+  defaultProxyToken: "",
+  defaultServerUrl: ""
 };

@@ -6,6 +6,7 @@
   <title>技能五子棋 | Neon Skill Gomoku</title>
   <link rel="stylesheet" href="./style.css">
   <script src="./config.js"></script>
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
 </head>
 <body>
   <main class="app">
@@ -164,20 +165,47 @@
 
   <div id="welcome-modal" class="modal welcome-modal" aria-hidden="false">
     <div class="modal-card welcome-card">
-      <p class="eyebrow">NEON ARENA · 霓虹竞技场</p>
+      <p class="eyebrow">NEON ARENA</p>
       <h2>选择对战模式</h2>
       <p class="modal-text">开始之前，选一个你想要的对局方式。</p>
-      <div class="welcome-buttons">
-        <button id="welcome-local" type="button" class="welcome-btn welcome-btn-local">
-          <span class="welcome-btn-icon">&#9823;</span>
-          <span class="welcome-btn-label">本地双人</span>
-          <span class="welcome-btn-desc">两人共用一台电脑，轮流落子</span>
+
+      <div id="welcome-mode-select" class="welcome-buttons welcome-3col">
+        <button id="welcome-online" type="button" class="welcome-btn welcome-btn-online">
+          <span class="welcome-btn-icon">&#127760;</span>
+          <span class="welcome-btn-label">在线对战</span>
+          <span class="welcome-btn-desc">各用自己的电脑，实时联机</span>
         </button>
         <button id="welcome-ai" type="button" class="welcome-btn welcome-btn-ai">
           <span class="welcome-btn-icon">&#9881;</span>
           <span class="welcome-btn-label">AI 对战</span>
           <span class="welcome-btn-desc">你执黑子，DeepSeek AI 执白子</span>
         </button>
+        <button id="welcome-local" type="button" class="welcome-btn welcome-btn-local">
+          <span class="welcome-btn-icon">&#9823;</span>
+          <span class="welcome-btn-label">本地练习</span>
+          <span class="welcome-btn-desc">同一台电脑，双人轮流落子</span>
+        </button>
+      </div>
+
+      <div id="welcome-room-panel" class="welcome-room-panel" hidden>
+        <button id="room-back" type="button" class="room-back-btn">&larr; 返回</button>
+        <div class="room-actions">
+          <button id="room-create" type="button" class="welcome-btn welcome-btn-create">
+            <span class="welcome-btn-label">创建房间</span>
+            <span class="welcome-btn-desc">生成房间码，等朋友加入</span>
+          </button>
+          <div class="room-join-group">
+            <span class="welcome-btn-label">加入房间</span>
+            <div class="room-join-row">
+              <input id="room-code-input" type="text" maxlength="4" placeholder="输入 4 位房间码" autocomplete="off">
+              <button id="room-join" type="button">加入</button>
+            </div>
+          </div>
+        </div>
+        <div id="room-status" class="room-status" hidden>
+          <div class="ai-thinking-pulse" aria-hidden="true"></div>
+          <span id="room-status-text">等待对手加入...</span>
+        </div>
       </div>
     </div>
   </div>

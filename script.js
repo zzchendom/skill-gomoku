@@ -174,6 +174,19 @@ function getEffectiveProxyToken() {
   );
 }
 
+function getServerUrl() {
+  return (
+    (typeof window !== "undefined" &&
+      window.SKILL_GOMOKU_CONFIG?.defaultServerUrl?.trim()) ||
+    getDefaultProxyUrl().replace(/\/api\/gomoku-move$/, "") ||
+    ""
+  );
+}
+
+let onlineSocket = null;
+let onlineColor = null;
+let onlineRoomCode = null;
+
 const dom = {
   board: document.querySelector("#board"),
   message: document.querySelector("#message"),
@@ -252,6 +265,11 @@ function createInitialState(mode = "local-pvp") {
       timerId: null,
       difficulty: "normal",
       engine: "local"
+    },
+    online: {
+      enabled: mode === "online",
+      myColor: null,
+      roomCode: null
     },
     history: []
   };
@@ -419,12 +437,20 @@ function renderStatus() {
 
   const engineTag = state.ai.engine === "proxy" ? "DeepSeek代理" : "本地引擎";
 
-  dom.modeLabel.textContent = state.ai.enabled
-    ? `玩家 vs AI · ${DIFFICULTY_LABELS[difficultyKey]} · ${engineTag}`
-    : "本地双人 · AI 预留";
+  if (state.online.enabled) {
+    const colorName = state.online.myColor === "black" ? "夜幕(黑)" : "星辉(白)";
+    dom.modeLabel.textContent = `在线对战 · 房间 ${state.online.roomCode || "?"} · 你是${colorName}`;
+  } else {
+    dom.modeLabel.textContent = state.ai.enabled
+      ? `玩家 vs AI · ${DIFFICULTY_LABELS[difficultyKey]} · ${engineTag}`
+      : "本地练习";
+  }
 
   let turnText = `第 ${state.match.turn} 手`;
-  if (state.ai.enabled && state.match.status === "playing") {
+  if (state.online.enabled && state.match.status === "playing") {
+    turnText += state.match.currentPlayer === state.online.myColor
+      ? " · 你的回合" : " · 对手回合";
+  } else if (state.ai.enabled && state.match.status === "playing") {
     turnText +=
       state.match.currentPlayer === "black" ? " · 你的回合" : " · AI 回合";
   }
@@ -1466,6 +1492,12 @@ function handleBoardClick(row, col) {
     return;
   }
 
+  if (state.online.enabled && state.match.currentPlayer !== state.online.myColor) {
+    setMessage("等待对手落子...");
+    renderStatus();
+    return;
+  }
+
   if (state.ai.enabled && state.match.currentPlayer === "white") {
     setMessage("当前轮到 AI 行动，请等待它完成思考。");
     renderStatus();
@@ -1473,11 +1505,33 @@ function handleBoardClick(row, col) {
   }
 
   if (state.skill.selectedSkill) {
-    tryApplySkill(row, col);
+    if (state.online.enabled) {
+      const skillId = state.skill.selectedSkill;
+      const targetableCells = getTargetableCells();
+      if (!targetableCells.has(`${row}-${col}`)) {
+        setMessage("这个位置不在当前技能的有效目标范围内。");
+        return;
+      }
+      if (skillId === "warp" && !state.skill.warpSource) {
+        tryApplySkill(row, col);
+        return;
+      }
+      emitSkill(skillId, row, col);
+    } else {
+      tryApplySkill(row, col);
+    }
     return;
   }
 
-  placeStone(row, col);
+  if (state.online.enabled) {
+    if (state.board.cells[row][col] || hasBlockedCell(row, col, state.match.currentPlayer)) {
+      setMessage("这个位置不能落子。");
+      return;
+    }
+    emitStone(row, col);
+  } else {
+    placeStone(row, col);
+  }
 }
 
 function handleCellHover(row, col) {
@@ -1527,13 +1581,23 @@ function updateBoardHoverState() {
 }
 
 function resetGame() {
+  if (state.online.enabled && onlineSocket) {
+    onlineSocket.emit("new-game-request");
+    return;
+  }
+  doResetGame();
+}
+
+function doResetGame() {
   clearAITimer();
   const mode = state.match.mode;
   const difficulty = state.ai.difficulty;
   const engine = state.ai.engine;
+  const onlineState = { ...state.online };
   state = createInitialState(mode);
   state.ai.difficulty = difficulty;
   state.ai.engine = engine === "proxy" ? "proxy" : "local";
+  state.online = onlineState;
   SFX.newGame();
   renderAll();
 }
@@ -1560,6 +1624,16 @@ function skipSkill() {
     return;
   }
 
+  if (state.online.enabled) {
+    if (state.match.currentPlayer !== state.online.myColor) return;
+    if (onlineSocket) onlineSocket.emit("skip-skill");
+    return;
+  }
+
+  doSkipSkill();
+}
+
+function doSkipSkill() {
   state.skill.warpSource = null;
   pushLog(`${PLAYER_LABELS[state.match.currentPlayer]} 放弃了本回合技能。`);
   setMessage("你跳过了技能窗口，回合将正常切换。");
@@ -1676,30 +1750,153 @@ function bindEvents() {
   dom.board.addEventListener("mouseleave", clearHoverCell);
 }
 
-function dismissWelcome(mode) {
-  const welcomeModal = document.querySelector("#welcome-modal");
-  if (welcomeModal) {
-    welcomeModal.classList.add("hidden");
-    welcomeModal.setAttribute("aria-hidden", "true");
+function hideWelcomeModal() {
+  const modal = document.querySelector("#welcome-modal");
+  if (modal) {
+    modal.classList.add("hidden");
+    modal.setAttribute("aria-hidden", "true");
   }
+}
+
+function dismissWelcome(mode) {
+  hideWelcomeModal();
 
   if (mode === "ai") {
     state = createInitialState("ai");
     state.ai.engine = "proxy";
     state.ui.logs = ["AI 对战模式已启用，DeepSeek 代理已自动激活。你先执黑子。"];
     state.ui.message = "你执黑子先行，AI 将在你落子后自动思考并应答。";
+  } else if (mode === "online") {
+    return;
   } else {
     state = createInitialState("local-pvp");
-    state.ui.logs = ["本地双人模式：两位玩家轮流在同一台电脑上落子。"];
-    state.ui.message = "双人模式已就绪——夜幕执子先行，争取做出 3 连来点亮技能面板。";
+    state.ui.logs = ["本地练习模式：两位玩家轮流在同一台电脑上落子。"];
+    state.ui.message = "练习模式已就绪——夜幕执子先行，争取做出 3 连来点亮技能面板。";
   }
 
   renderAll();
 }
 
+function startOnlineGame(color, roomCode) {
+  hideWelcomeModal();
+  state = createInitialState("online");
+  state.online.myColor = color;
+  state.online.roomCode = roomCode;
+  onlineColor = color;
+  onlineRoomCode = roomCode;
+
+  const colorName = color === "black" ? "夜幕(黑)" : "星辉(白)";
+  state.ui.logs = [`在线对战已开始！你是${colorName}，房间码 ${roomCode}。`];
+  state.ui.message = color === "black"
+    ? "你先行——落子开始对局。"
+    : "等待对手（黑方）先行...";
+  renderAll();
+}
+
+function emitStone(row, col) {
+  if (onlineSocket) {
+    onlineSocket.emit("place-stone", { row, col });
+  }
+}
+
+function emitSkill(skillId, row, col) {
+  if (onlineSocket) {
+    onlineSocket.emit("use-skill", {
+      skillId,
+      row,
+      col,
+      warpSource: state.skill.warpSource
+    });
+  }
+}
+
+function connectSocket() {
+  const url = getServerUrl();
+  if (!url) {
+    setRoomStatus("未配置服务器地址，请检查 config.js");
+    return;
+  }
+
+  if (onlineSocket) {
+    onlineSocket.disconnect();
+  }
+
+  onlineSocket = io(url, { transports: ["websocket", "polling"] });
+
+  onlineSocket.on("connect_error", () => {
+    setRoomStatus("连接服务器失败，请检查网络或服务器状态");
+  });
+
+  onlineSocket.on("opponent-joined", (data) => {
+    SFX.newGame();
+    startOnlineGame(data.color, onlineRoomCode);
+  });
+
+  onlineSocket.on("stone-placed", (data) => {
+    if (state.match.status === "finished") return;
+    if (state.board.cells[data.row][data.col]) return;
+    placeStone(data.row, data.col);
+  });
+
+  onlineSocket.on("skill-used", (data) => {
+    if (state.match.status === "finished") return;
+    if (data.warpSource) {
+      state.skill.warpSource = data.warpSource;
+    }
+    state.skill.selectedSkill = data.skillId;
+    tryApplySkill(data.row, data.col);
+  });
+
+  onlineSocket.on("skill-skipped", () => {
+    if (state.match.status === "finished") return;
+    doSkipSkill();
+  });
+
+  onlineSocket.on("new-game-sync", () => {
+    doResetGame();
+  });
+
+  onlineSocket.on("opponent-disconnected", () => {
+    pushLog("对手已断开连接。");
+    setMessage("对手已离开房间，对局中断。");
+    renderAll();
+  });
+}
+
+function setRoomStatus(text, show = true) {
+  const el = document.querySelector("#room-status");
+  const textEl = document.querySelector("#room-status-text");
+  if (el) el.hidden = !show;
+  if (textEl) textEl.textContent = text;
+}
+
+function showRoomPanel() {
+  const modeSelect = document.querySelector("#welcome-mode-select");
+  const roomPanel = document.querySelector("#welcome-room-panel");
+  if (modeSelect) modeSelect.hidden = true;
+  if (roomPanel) roomPanel.hidden = false;
+}
+
+function showModeSelect() {
+  const modeSelect = document.querySelector("#welcome-mode-select");
+  const roomPanel = document.querySelector("#welcome-room-panel");
+  if (modeSelect) modeSelect.hidden = false;
+  if (roomPanel) roomPanel.hidden = true;
+  setRoomStatus("", false);
+  if (onlineSocket) {
+    onlineSocket.disconnect();
+    onlineSocket = null;
+  }
+}
+
 function bindWelcome() {
-  const btnLocal = document.querySelector("#welcome-local");
+  const btnOnline = document.querySelector("#welcome-online");
   const btnAi = document.querySelector("#welcome-ai");
+  const btnLocal = document.querySelector("#welcome-local");
+  const btnBack = document.querySelector("#room-back");
+  const btnCreate = document.querySelector("#room-create");
+  const btnJoin = document.querySelector("#room-join");
+  const inputCode = document.querySelector("#room-code-input");
 
   if (btnLocal) {
     btnLocal.addEventListener("click", () => {
@@ -1712,6 +1909,69 @@ function bindWelcome() {
     btnAi.addEventListener("click", () => {
       SFX.newGame();
       dismissWelcome("ai");
+    });
+  }
+
+  if (btnOnline) {
+    btnOnline.addEventListener("click", () => {
+      SFX.click();
+      showRoomPanel();
+    });
+  }
+
+  if (btnBack) {
+    btnBack.addEventListener("click", () => {
+      SFX.click();
+      showModeSelect();
+    });
+  }
+
+  if (btnCreate) {
+    btnCreate.addEventListener("click", () => {
+      SFX.click();
+      connectSocket();
+      setRoomStatus("正在连接服务器...");
+
+      onlineSocket.on("connect", () => {
+        onlineSocket.emit("create-room", (resp) => {
+          if (resp.error) {
+            setRoomStatus(resp.error);
+            return;
+          }
+          onlineRoomCode = resp.code;
+          setRoomStatus(`房间码: ${resp.code} — 等待对手加入...`);
+        });
+      });
+    });
+  }
+
+  if (btnJoin && inputCode) {
+    const doJoin = () => {
+      const code = inputCode.value.trim();
+      if (code.length !== 4) {
+        setRoomStatus("请输入 4 位房间码");
+        return;
+      }
+      SFX.click();
+      connectSocket();
+      setRoomStatus("正在连接...");
+
+      onlineSocket.on("connect", () => {
+        onlineSocket.emit("join-room", { code }, (resp) => {
+          if (resp.error) {
+            setRoomStatus(resp.error);
+            return;
+          }
+          onlineRoomCode = resp.code;
+          SFX.newGame();
+          startOnlineGame(resp.color, resp.code);
+        });
+      });
+    };
+
+    btnJoin.addEventListener("click", doJoin);
+    inputCode.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") doJoin();
     });
   }
 }
