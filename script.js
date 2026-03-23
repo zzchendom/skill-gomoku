@@ -1815,10 +1815,11 @@ function emitSkill(skillId, row, col) {
   }
 }
 
-function connectSocket(onConnect) {
+function connectSocket(onConnect, onFail) {
   const url = getServerUrl();
   if (!url) {
     setRoomStatus("未配置服务器地址，请检查 config.js");
+    if (onFail) onFail();
     return;
   }
 
@@ -1829,19 +1830,26 @@ function connectSocket(onConnect) {
 
   setRoomStatus("正在唤醒服务器，首次可能需要 30-60 秒...");
 
+  let settled = false;
+
   onlineSocket = io(url, {
-    transports: ["websocket", "polling"],
+    transports: ["polling", "websocket"],
     timeout: 90000,
-    reconnectionAttempts: 3,
-    reconnectionDelay: 2000
+    reconnection: false
   });
 
   onlineSocket.on("connect", () => {
+    if (settled) return;
+    settled = true;
+    setRoomStatus("已连接，正在创建房间...");
     if (onConnect) onConnect();
   });
 
   onlineSocket.on("connect_error", (err) => {
-    setRoomStatus("连接服务器失败，服务器可能正在启动，请稍后再试");
+    if (settled) return;
+    settled = true;
+    setRoomStatus("连接失败：" + (err.message || "网络异常") + "，请重试");
+    if (onFail) onFail();
   });
 
   onlineSocket.on("opponent-joined", (data) => {
@@ -1945,19 +1953,23 @@ function bindWelcome() {
 
   if (btnCreate) {
     btnCreate.addEventListener("click", () => {
+      if (btnCreate.disabled) return;
       SFX.click();
       btnCreate.disabled = true;
-      connectSocket(() => {
-        onlineSocket.emit("create-room", (resp) => {
-          btnCreate.disabled = false;
-          if (resp.error) {
-            setRoomStatus(resp.error);
-            return;
-          }
-          onlineRoomCode = resp.code;
-          setRoomStatus(`房间码: ${resp.code} — 等待对手加入...`);
-        });
-      });
+      connectSocket(
+        () => {
+          onlineSocket.emit("create-room", (resp) => {
+            btnCreate.disabled = false;
+            if (resp.error) {
+              setRoomStatus(resp.error);
+              return;
+            }
+            onlineRoomCode = resp.code;
+            setRoomStatus(`房间码: ${resp.code} — 把这个码发给朋友，等待加入...`);
+          });
+        },
+        () => { btnCreate.disabled = false; }
+      );
     });
   }
 
@@ -1968,20 +1980,24 @@ function bindWelcome() {
         setRoomStatus("请输入 4 位房间码");
         return;
       }
+      if (btnJoin.disabled) return;
       SFX.click();
       btnJoin.disabled = true;
-      connectSocket(() => {
-        onlineSocket.emit("join-room", { code }, (resp) => {
-          btnJoin.disabled = false;
-          if (resp.error) {
-            setRoomStatus(resp.error);
-            return;
-          }
-          onlineRoomCode = resp.code;
-          SFX.newGame();
-          startOnlineGame(resp.color, resp.code);
-        });
-      });
+      connectSocket(
+        () => {
+          onlineSocket.emit("join-room", { code }, (resp) => {
+            btnJoin.disabled = false;
+            if (resp.error) {
+              setRoomStatus(resp.error);
+              return;
+            }
+            onlineRoomCode = resp.code;
+            SFX.newGame();
+            startOnlineGame(resp.color, resp.code);
+          });
+        },
+        () => { btnJoin.disabled = false; }
+      );
     };
 
     btnJoin.addEventListener("click", doJoin);
