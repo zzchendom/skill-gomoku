@@ -145,9 +145,11 @@ const DIFFICULTY_LABELS = {
 
 const STORAGE_PROXY_URL = "skill-gomoku-ai-proxy-url";
 const STORAGE_PROXY_TOKEN = "skill-gomoku-ai-proxy-token";
+const STORAGE_ONLINE_TOKEN = "skill-gomoku-online-token";
 const ROOM_ACK_TIMEOUT_MS = 20000;
 const ONLINE_SERVER_WAKE_TIMEOUT_MS = 65000;
 const ONLINE_SERVER_WAKE_RETRY_MS = 2500;
+const ONLINE_RECONNECT_GRACE_MS = 20000;
 
 function getDefaultProxyUrl() {
   return (
@@ -186,9 +188,33 @@ function getServerUrl() {
   );
 }
 
+function getStoredOnlineToken() {
+  return sessionStorage.getItem(STORAGE_ONLINE_TOKEN) || "";
+}
+
+function refreshOnlineSocketAuth() {
+  if (onlineSocket) {
+    onlineSocket.auth = {
+      roomCode: onlineRoomCode,
+      reconnectToken: onlineReconnectToken
+    };
+  }
+}
+
+function setStoredOnlineToken(token) {
+  if (token) {
+    sessionStorage.setItem(STORAGE_ONLINE_TOKEN, token);
+  } else {
+    sessionStorage.removeItem(STORAGE_ONLINE_TOKEN);
+  }
+  onlineReconnectToken = token || "";
+  refreshOnlineSocketAuth();
+}
+
 let onlineSocket = null;
 let onlineColor = null;
 let onlineRoomCode = null;
+let onlineReconnectToken = getStoredOnlineToken();
 const onlineLobby = {
   action: "idle",
   connectPromise: null,
@@ -208,6 +234,10 @@ const dom = {
   skillHint: document.querySelector("#skill-hint"),
   skillList: document.querySelector("#skill-list"),
   logList: document.querySelector("#log-list"),
+  chatCard: document.querySelector("#chat-card"),
+  chatList: document.querySelector("#chat-list"),
+  chatInput: document.querySelector("#chat-input"),
+  chatSend: document.querySelector("#chat-send"),
   modeLocal: document.querySelector("#mode-local"),
   modeAi: document.querySelector("#mode-ai"),
   aiThinkingLayer: document.querySelector("#ai-thinking-layer"),
@@ -288,7 +318,8 @@ function createInitialState(mode = "local-pvp") {
     online: {
       enabled: mode === "online",
       myColor: null,
-      roomCode: null
+      roomCode: null,
+      chatMessages: []
     },
     history: []
   };
@@ -340,6 +371,53 @@ function restoreSnapshot(snapshot) {
       timerId: null
     }
   };
+}
+
+function buildOnlineSessionState() {
+  return {
+    board: structuredClone(state.board),
+    match: structuredClone(state.match),
+    skill: structuredClone(state.skill),
+    ui: {
+      message: state.ui.message,
+      logs: [...state.ui.logs],
+      hoverCell: null
+    },
+    history: structuredClone(state.history)
+  };
+}
+
+function applyOnlineSessionState(sessionState) {
+  clearAITimer();
+  const currentOnline = {
+    ...state.online
+  };
+
+  state = {
+    ...state,
+    board: structuredClone(sessionState.board),
+    match: {
+      ...structuredClone(sessionState.match),
+      mode: "online"
+    },
+    skill: structuredClone(sessionState.skill),
+    ui: {
+      message: sessionState.ui.message,
+      logs: [...sessionState.ui.logs],
+      effects: [],
+      hoverCell: null
+    },
+    ai: {
+      ...state.ai,
+      enabled: false,
+      pendingAction: null,
+      thinking: false,
+      timerId: null
+    },
+    online: currentOnline,
+    history: structuredClone(sessionState.history || [])
+  };
+  renderAll();
 }
 
 function isInside(row, col) {
@@ -492,6 +570,12 @@ function renderStatus() {
   dom.message.textContent = state.ui.message;
   dom.undoMove.disabled = state.history.length === 0;
   dom.skipSkill.disabled = !state.skill.pendingTrigger;
+  if (dom.chatInput) {
+    dom.chatInput.disabled = !state.online.enabled;
+  }
+  if (dom.chatSend) {
+    dom.chatSend.disabled = !state.online.enabled;
+  }
   dom.modeLocal.classList.toggle("active", !state.ai.enabled);
   dom.modeAi.classList.toggle("active", state.ai.enabled);
 
@@ -602,6 +686,65 @@ function renderLogs() {
     li.textContent = item;
     dom.logList.appendChild(li);
   });
+}
+
+function appendChatMessage(player, text, timestamp = Date.now()) {
+  if (!state.online.chatMessages) {
+    state.online.chatMessages = [];
+  }
+
+  state.online.chatMessages.push({
+    player,
+    text,
+    timestamp
+  });
+  state.online.chatMessages = state.online.chatMessages.slice(-40);
+}
+
+function renderChat() {
+  if (!dom.chatCard || !dom.chatList) {
+    return;
+  }
+
+  const onlineVisible = state.online.enabled;
+  dom.chatCard.hidden = !onlineVisible;
+  dom.chatList.innerHTML = "";
+
+  if (!onlineVisible) {
+    return;
+  }
+
+  const messages = state.online.chatMessages || [];
+
+  if (!messages.length) {
+    const li = document.createElement("li");
+    li.className = "chat-item";
+    li.innerHTML = `<span class="chat-meta">系统</span><span class="chat-text">已连接后可在这里和对手聊天。</span>`;
+    dom.chatList.appendChild(li);
+    return;
+  }
+
+  messages.forEach((item) => {
+    const li = document.createElement("li");
+    const isSelf = item.player === state.online.myColor;
+    const playerName =
+      item.player === "black"
+        ? "黑方"
+        : item.player === "white"
+          ? "白方"
+          : "系统";
+    const timeText = new Date(item.timestamp).toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit"
+    });
+
+    li.className = `chat-item${isSelf ? " self" : ""}`;
+    li.innerHTML = `<span class="chat-meta">${playerName} · ${timeText}</span><span class="chat-text"></span>`;
+    li.querySelector(".chat-text").textContent = item.text;
+    dom.chatList.appendChild(li);
+  });
+
+  dom.chatList.scrollTop = dom.chatList.scrollHeight;
 }
 
 function getTargetableCells() {
@@ -831,6 +974,7 @@ function renderAll() {
   renderStatus();
   renderSkills();
   renderLogs();
+  renderChat();
   renderBoard();
   renderWinnerModal();
   maybeRunAI();
@@ -1628,6 +1772,33 @@ function doResetGame() {
 
 function undoMove() {
   clearAITimer();
+  if (state.online.enabled) {
+    if (!state.history.length) {
+      setMessage("还没有可悔的棋步。");
+      renderAll();
+      return;
+    }
+
+    const snapshot = state.history[state.history.length - 1];
+    const sessionState = {
+      board: structuredClone(snapshot.board),
+      match: {
+        ...structuredClone(snapshot.match),
+        mode: "online"
+      },
+      skill: structuredClone(snapshot.skill),
+      ui: {
+        message: "悔棋成功。你可以重新思考这一手。",
+        logs: ["已回退到上一步状态。", ...snapshot.ui.logs].slice(0, 8)
+      },
+      history: structuredClone(state.history.slice(0, -1))
+    };
+
+    applyOnlineSessionState(sessionState);
+    emitStateSync(sessionState);
+    return;
+  }
+
   if (!state.history.length) {
     setMessage("还没有可悔的棋步。");
     renderAll();
@@ -1663,6 +1834,20 @@ function doSkipSkill() {
   setMessage("你跳过了技能窗口，回合将正常切换。");
   advanceTurn();
   renderAll();
+}
+
+function handleSendChat() {
+  if (!state.online.enabled || !dom.chatInput) {
+    return;
+  }
+
+  const text = dom.chatInput.value.trim();
+  if (!text) {
+    return;
+  }
+
+  emitChatMessage(text);
+  dom.chatInput.value = "";
 }
 
 function setMode(mode) {
@@ -1761,6 +1946,17 @@ function bindEvents() {
   dom.modalNewGame.addEventListener("click", resetGame);
   dom.undoMove.addEventListener("click", undoMove);
   dom.skipSkill.addEventListener("click", skipSkill);
+  if (dom.chatSend) {
+    dom.chatSend.addEventListener("click", handleSendChat);
+  }
+  if (dom.chatInput) {
+    dom.chatInput.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        handleSendChat();
+      }
+    });
+  }
   document.addEventListener("keydown", handleGlobalKeydown);
   dom.board.addEventListener("mouseover", (event) => {
     const cell = event.target.closest(".cell");
@@ -1812,11 +2008,14 @@ function startOnlineGame(color, roomCode) {
 
   setLobbyAction("playing");
   hideWelcomeModal();
+  const chatMessages = state.online.chatMessages ? [...state.online.chatMessages] : [];
   state = createInitialState("online");
   state.online.myColor = color;
   state.online.roomCode = roomCode;
+  state.online.chatMessages = chatMessages;
   onlineColor = color;
   onlineRoomCode = roomCode;
+  refreshOnlineSocketAuth();
 
   const colorName = color === "black" ? "夜幕(黑)" : "星辉(白)";
   state.ui.logs = [`在线对战已开始！你是${colorName}，房间码 ${roomCode}。`];
@@ -1840,6 +2039,21 @@ function emitSkill(skillId, row, col) {
       col,
       warpSource: state.skill.warpSource
     });
+  }
+}
+
+function emitStateSync(sessionState, targetRole = null) {
+  if (onlineSocket) {
+    onlineSocket.emit("sync-state", {
+      sessionState,
+      targetRole
+    });
+  }
+}
+
+function emitChatMessage(text) {
+  if (onlineSocket) {
+    onlineSocket.emit("chat-message", { text });
   }
 }
 
@@ -1910,6 +2124,7 @@ function disconnectOnlineSocket() {
   setLobbyAction("idle");
   onlineColor = null;
   onlineRoomCode = null;
+  setStoredOnlineToken("");
 
   if (onlineSocket) {
     onlineSocket.disconnect();
@@ -2030,8 +2245,26 @@ function bindOnlineSocketEvents(socket) {
     startOnlineGame(data.color, data.code || onlineRoomCode);
   });
 
+  socket.on("session-restored", (data) => {
+    onlineRoomCode = data.code || onlineRoomCode;
+    refreshOnlineSocketAuth();
+    if (data.reconnectToken) {
+      setStoredOnlineToken(data.reconnectToken);
+    }
+    if (data.started) {
+      startOnlineGame(data.color, data.code || onlineRoomCode);
+      pushLog("联机连接已恢复，正在向对手同步最新盘面。");
+      setMessage("连接已恢复，等待最新盘面同步...");
+      renderAll();
+    } else {
+      setLobbyAction("waiting");
+      setRoomStatus(`已恢复到房间 ${onlineRoomCode}，等待另一位玩家加入。`);
+    }
+  });
+
   socket.on("opponent-joined", (data) => {
     onlineRoomCode = data.code || onlineRoomCode;
+    refreshOnlineSocketAuth();
     if (!state.online.enabled) {
       setLobbyAction("starting");
       setRoomStatus(`玩家已加入房间 ${onlineRoomCode}，正在开始对战...`);
@@ -2062,16 +2295,48 @@ function bindOnlineSocketEvents(socket) {
     doResetGame();
   });
 
+  socket.on("state-sync", (data) => {
+    if (!data?.sessionState) {
+      return;
+    }
+
+    if (!state.online.enabled && data.code && data.color) {
+      startOnlineGame(data.color, data.code);
+    }
+
+    applyOnlineSessionState(data.sessionState);
+    pushLog("已与对手同步最新对局状态。");
+    renderAll();
+  });
+
+  socket.on("request-state-sync", (data) => {
+    if (!state.online.enabled) {
+      return;
+    }
+
+    emitStateSync(buildOnlineSessionState(), data?.targetRole || null);
+  });
+
+  socket.on("chat-message", (data) => {
+    if (!data?.text) {
+      return;
+    }
+
+    appendChatMessage(data.player, data.text, data.timestamp);
+    renderChat();
+  });
+
   socket.on("opponent-disconnected", () => {
     if (!state.online.enabled) {
       setLobbyAction("ready");
       setRoomStatus("对手已离开，房间已失效，请重新创建或加入。");
       setRoomControlsDisabled(false);
+      setRoomButtonLabels();
       return;
     }
 
-    pushLog("对手已断开连接。");
-    setMessage("对手已离开房间，对局中断。");
+    pushLog("对手连接断开，服务器正在等待其重连。");
+    setMessage(`对手连接中断，服务器会保留房间 ${Math.round(ONLINE_RECONNECT_GRACE_MS / 1000)} 秒等待其重连。`);
     renderAll();
   });
 
@@ -2129,6 +2394,10 @@ async function ensureOnlineSocket() {
     }
 
     const socket = window.io(url, {
+      auth: {
+        roomCode: onlineRoomCode,
+        reconnectToken: onlineReconnectToken
+      },
       transports: ["websocket", "polling"],
       timeout: 20000,
       reconnection: true,
@@ -2224,6 +2493,10 @@ async function handleCreateRoom() {
     }
 
     onlineRoomCode = resp.code;
+    refreshOnlineSocketAuth();
+    if (resp.reconnectToken) {
+      setStoredOnlineToken(resp.reconnectToken);
+    }
     setLobbyAction("waiting");
     if (dom.roomCreate) dom.roomCreate.disabled = false;
     if (dom.roomJoin) dom.roomJoin.disabled = false;
@@ -2274,6 +2547,10 @@ async function handleJoinRoom() {
     }
 
     onlineRoomCode = resp.code;
+    refreshOnlineSocketAuth();
+    if (resp.reconnectToken) {
+      setStoredOnlineToken(resp.reconnectToken);
+    }
     setLobbyAction("starting");
     if (dom.roomCreate) dom.roomCreate.disabled = false;
     if (dom.roomJoin) dom.roomJoin.disabled = false;

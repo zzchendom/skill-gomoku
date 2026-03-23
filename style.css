@@ -872,6 +872,63 @@ body[data-turn="white"] .player-badge-white.active {
   border-left: 2px solid rgba(126, 231, 255, 0.18);
 }
 
+.chat-list {
+  margin: 0 0 12px;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 8px;
+  max-height: 220px;
+  overflow: auto;
+}
+
+.chat-item {
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.04);
+  border-left: 2px solid rgba(126, 231, 255, 0.18);
+}
+
+.chat-item.self {
+  border-left-color: rgba(125, 255, 188, 0.45);
+  background: rgba(125, 255, 188, 0.08);
+}
+
+.chat-meta {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 0.76rem;
+  color: var(--text-muted);
+}
+
+.chat-text {
+  display: block;
+  line-height: 1.5;
+  color: var(--text-main);
+  word-break: break-word;
+}
+
+.chat-compose {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.chat-compose input {
+  width: 100%;
+  min-width: 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(126, 231, 255, 0.2);
+  background: rgba(5, 8, 20, 0.9);
+  color: var(--text-main);
+}
+
+.chat-compose button {
+  border-radius: 12px;
+  padding-inline: 16px;
+}
+
 .rules-card summary {
   cursor: pointer;
   font-weight: 700;

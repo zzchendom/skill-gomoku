@@ -1,5 +1,6 @@
 import "dotenv/config";
 import http from "node:http";
+import crypto from "node:crypto";
 import express from "express";
 import cors from "cors";
 import { Server as SocketServer } from "socket.io";
@@ -157,6 +158,7 @@ app.post("/api/gomoku-move", async (req, res) => {
 /* ───────── WebSocket room-based multiplayer ───────── */
 
 const rooms = new Map();
+const RECONNECT_GRACE_MS = 20000;
 
 function generateRoomCode() {
   let code;
@@ -164,6 +166,10 @@ function generateRoomCode() {
     code = String(Math.floor(1000 + Math.random() * 9000));
   } while (rooms.has(code));
   return code;
+}
+
+function generateReconnectToken() {
+  return crypto.randomBytes(16).toString("hex");
 }
 
 function getRoomBySocket(socket) {
@@ -187,6 +193,77 @@ function clearSocketRoom(socket) {
   socket.data.roomRole = null;
 }
 
+function clearReconnectTimer(room, role) {
+  const key = role === "black" ? "blackDisconnectTimer" : "whiteDisconnectTimer";
+  if (room[key]) {
+    clearTimeout(room[key]);
+    room[key] = null;
+  }
+}
+
+function getSocketRoleInRoom(socket, room) {
+  if (room.black === socket.id) return "black";
+  if (room.white === socket.id) return "white";
+  return null;
+}
+
+function getOpponentRole(role) {
+  return role === "black" ? "white" : "black";
+}
+
+function getSocketIdByRole(room, role) {
+  return role === "black" ? room.black : room.white;
+}
+
+function tryRestoreRoom(socket) {
+  const auth = socket.handshake.auth || {};
+  const code = String(auth.roomCode || "").trim();
+  const reconnectToken = String(auth.reconnectToken || "").trim();
+
+  if (!code || !reconnectToken) {
+    return false;
+  }
+
+  const room = rooms.get(code);
+  if (!room) {
+    return false;
+  }
+
+  if (room.blackToken === reconnectToken) {
+    room.black = socket.id;
+    clearReconnectTimer(room, "black");
+    bindSocketToRoom(socket, code, "black");
+    socket.emit("session-restored", {
+      code,
+      color: "black",
+      started: room.started,
+      reconnectToken
+    });
+    if (room.started && room.white) {
+      io.to(room.white).emit("request-state-sync", { targetRole: "black" });
+    }
+    return true;
+  }
+
+  if (room.whiteToken === reconnectToken) {
+    room.white = socket.id;
+    clearReconnectTimer(room, "white");
+    bindSocketToRoom(socket, code, "white");
+    socket.emit("session-restored", {
+      code,
+      color: "white",
+      started: room.started,
+      reconnectToken
+    });
+    if (room.started && room.black) {
+      io.to(room.black).emit("request-state-sync", { targetRole: "white" });
+    }
+    return true;
+  }
+
+  return false;
+}
+
 function leaveCurrentRoom(socket, notifyOpponent = true) {
   const found = getRoomBySocket(socket);
   if (!found) {
@@ -195,8 +272,9 @@ function leaveCurrentRoom(socket, notifyOpponent = true) {
   }
 
   const { code, room } = found;
-  const isBlack = room.black === socket.id;
-  const isWhite = room.white === socket.id;
+  const role = getSocketRoleInRoom(socket, room);
+  const isBlack = role === "black";
+  const isWhite = role === "white";
 
   if (!isBlack && !isWhite) {
     socket.leave(code);
@@ -205,6 +283,7 @@ function leaveCurrentRoom(socket, notifyOpponent = true) {
   }
 
   const opponentId = isBlack ? room.white : room.black;
+  clearReconnectTimer(room, role);
   socket.leave(code);
   clearSocketRoom(socket);
   rooms.delete(code);
@@ -221,18 +300,33 @@ const httpServer = http.createServer(app);
 const io = new SocketServer(httpServer, {
   cors: corsOpts,
   pingInterval: 15000,
-  pingTimeout: 10000
+  pingTimeout: 10000,
+  connectionStateRecovery: {
+    maxDisconnectionDuration: RECONNECT_GRACE_MS,
+    skipMiddlewares: true
+  }
 });
 
 io.on("connection", (socket) => {
+  tryRestoreRoom(socket);
+
   socket.on("create-room", (callback) => {
     leaveCurrentRoom(socket);
 
     const code = generateRoomCode();
-    rooms.set(code, { black: socket.id, white: null, started: false });
+    const reconnectToken = generateReconnectToken();
+    rooms.set(code, {
+      black: socket.id,
+      white: null,
+      blackToken: reconnectToken,
+      whiteToken: null,
+      blackDisconnectTimer: null,
+      whiteDisconnectTimer: null,
+      started: false
+    });
     bindSocketToRoom(socket, code, "black");
     console.log(`[room] ${code} created by ${socket.id}`);
-    if (typeof callback === "function") callback({ code });
+    if (typeof callback === "function") callback({ code, reconnectToken, color: "black" });
   });
 
   socket.on("join-room", (data, callback) => {
@@ -251,6 +345,7 @@ io.on("connection", (socket) => {
 
     leaveCurrentRoom(socket);
     room.white = socket.id;
+    room.whiteToken = generateReconnectToken();
     room.started = true;
     bindSocketToRoom(socket, code, "white");
     console.log(`[room] ${code} joined by ${socket.id}`);
@@ -260,7 +355,12 @@ io.on("connection", (socket) => {
     io.to(room.white).emit("game-started", { color: "white", code });
 
     if (typeof callback === "function") {
-      callback({ code, color: "white", waitForStart: true });
+      callback({
+        code,
+        color: "white",
+        reconnectToken: room.whiteToken,
+        waitForStart: true
+      });
     }
   });
 
@@ -304,8 +404,85 @@ io.on("connection", (socket) => {
     io.to(found.code).emit("new-game-sync");
   });
 
+  socket.on("sync-state", (data) => {
+    const found = getRoomBySocket(socket);
+    if (!found || !found.room.started || !data?.sessionState) return;
+
+    const role = getSocketRoleInRoom(socket, found.room);
+    const targetRole = data.targetRole;
+
+    if (targetRole === "black" || targetRole === "white") {
+      const targetSocketId = getSocketIdByRole(found.room, targetRole);
+      if (targetSocketId) {
+        io.to(targetSocketId).emit("state-sync", {
+          sessionState: data.sessionState,
+          code: found.code,
+          color: targetRole
+        });
+      }
+      return;
+    }
+
+    io.to(found.code).emit("state-sync", {
+      sessionState: data.sessionState,
+      code: found.code,
+      color: role
+    });
+  });
+
+  socket.on("chat-message", (data) => {
+    const found = getRoomBySocket(socket);
+    if (!found || !found.room.started) return;
+
+    const text = String(data?.text || "").trim().slice(0, 120);
+    if (!text) return;
+
+    io.to(found.code).emit("chat-message", {
+      player: getSocketRoleInRoom(socket, found.room),
+      text,
+      timestamp: Date.now()
+    });
+  });
+
   socket.on("disconnect", () => {
-    leaveCurrentRoom(socket);
+    const found = getRoomBySocket(socket);
+    if (!found) {
+      clearSocketRoom(socket);
+      return;
+    }
+
+    const { code, room } = found;
+    const role = getSocketRoleInRoom(socket, room);
+    if (!role) {
+      clearSocketRoom(socket);
+      return;
+    }
+
+    const opponentRole = getOpponentRole(role);
+    const timerKey = role === "black" ? "blackDisconnectTimer" : "whiteDisconnectTimer";
+
+    room[role] = null;
+    clearSocketRoom(socket);
+    clearReconnectTimer(room, role);
+    room[timerKey] = setTimeout(() => {
+      const refreshed = rooms.get(code);
+      if (!refreshed) {
+        return;
+      }
+
+      if (refreshed[role]) {
+        return;
+      }
+
+      const remainingOpponentId = getSocketIdByRole(refreshed, opponentRole);
+
+      if (remainingOpponentId) {
+        io.to(remainingOpponentId).emit("opponent-disconnected");
+      }
+
+      rooms.delete(code);
+      console.log(`[room] ${code} dissolved after reconnect grace`);
+    }, RECONNECT_GRACE_MS);
   });
 });
 
