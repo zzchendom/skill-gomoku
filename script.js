@@ -1815,7 +1815,7 @@ function emitSkill(skillId, row, col) {
   }
 }
 
-function connectSocket() {
+function connectSocket(onConnect) {
   const url = getServerUrl();
   if (!url) {
     setRoomStatus("未配置服务器地址，请检查 config.js");
@@ -1824,12 +1824,24 @@ function connectSocket() {
 
   if (onlineSocket) {
     onlineSocket.disconnect();
+    onlineSocket = null;
   }
 
-  onlineSocket = io(url, { transports: ["websocket", "polling"] });
+  setRoomStatus("正在唤醒服务器，首次可能需要 30-60 秒...");
 
-  onlineSocket.on("connect_error", () => {
-    setRoomStatus("连接服务器失败，请检查网络或服务器状态");
+  onlineSocket = io(url, {
+    transports: ["websocket", "polling"],
+    timeout: 90000,
+    reconnectionAttempts: 3,
+    reconnectionDelay: 2000
+  });
+
+  onlineSocket.on("connect", () => {
+    if (onConnect) onConnect();
+  });
+
+  onlineSocket.on("connect_error", (err) => {
+    setRoomStatus("连接服务器失败，服务器可能正在启动，请稍后再试");
   });
 
   onlineSocket.on("opponent-joined", (data) => {
@@ -1934,11 +1946,10 @@ function bindWelcome() {
   if (btnCreate) {
     btnCreate.addEventListener("click", () => {
       SFX.click();
-      connectSocket();
-      setRoomStatus("正在连接服务器...");
-
-      onlineSocket.on("connect", () => {
+      btnCreate.disabled = true;
+      connectSocket(() => {
         onlineSocket.emit("create-room", (resp) => {
+          btnCreate.disabled = false;
           if (resp.error) {
             setRoomStatus(resp.error);
             return;
@@ -1958,11 +1969,10 @@ function bindWelcome() {
         return;
       }
       SFX.click();
-      connectSocket();
-      setRoomStatus("正在连接...");
-
-      onlineSocket.on("connect", () => {
+      btnJoin.disabled = true;
+      connectSocket(() => {
         onlineSocket.emit("join-room", { code }, (resp) => {
+          btnJoin.disabled = false;
           if (resp.error) {
             setRoomStatus(resp.error);
             return;
