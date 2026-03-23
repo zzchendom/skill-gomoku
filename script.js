@@ -236,7 +236,9 @@ const dom = {
   roomJoin: document.querySelector("#room-join"),
   roomCodeInput: document.querySelector("#room-code-input"),
   roomStatus: document.querySelector("#room-status"),
-  roomStatusText: document.querySelector("#room-status-text")
+  roomStatusText: document.querySelector("#room-status-text"),
+  roomCreateLabel: document.querySelector("#room-create .welcome-btn-label"),
+  roomJoinLabel: document.querySelector("#room-join")
 };
 
 let state = createInitialState();
@@ -1866,6 +1868,30 @@ function setRoomJoinInputDisabled(disabled) {
   if (dom.roomCodeInput) dom.roomCodeInput.disabled = disabled;
 }
 
+function setRoomButtonLabels(createText = "创建房间", joinText = "加入") {
+  if (dom.roomCreateLabel) {
+    dom.roomCreateLabel.textContent = createText;
+  }
+  if (dom.roomJoinLabel) {
+    dom.roomJoinLabel.textContent = joinText;
+  }
+}
+
+function isLobbyPanelVisible() {
+  return Boolean(dom.welcomeRoomPanel && !dom.welcomeRoomPanel.hidden && !state.online.enabled);
+}
+
+function reportLobbyError(message) {
+  if (!isLobbyPanelVisible()) {
+    return;
+  }
+
+  setLobbyAction("error");
+  setRoomStatus(`联机调试：${message}`);
+  setRoomControlsDisabled(false);
+  setRoomButtonLabels();
+}
+
 function disconnectOnlineSocket() {
   onlineLobby.connectPromise = null;
   onlineLobby.warmupPromise = null;
@@ -2048,6 +2074,7 @@ function bindOnlineSocketEvents(socket) {
       setLobbyAction("reconnecting");
       setRoomStatus("联机连接已断开，请稍候后重试创建/加入房间。");
       setRoomControlsDisabled(false);
+      setRoomButtonLabels();
       return;
     }
 
@@ -2137,6 +2164,7 @@ function showRoomPanel() {
   if (dom.welcomeModeSelect) dom.welcomeModeSelect.hidden = true;
   if (dom.welcomeRoomPanel) dom.welcomeRoomPanel.hidden = false;
   if (dom.roomCodeInput) dom.roomCodeInput.value = "";
+  setRoomButtonLabels();
   setRoomStatus("联机大厅已打开。你可以直接点“创建房间”，或输入房间号后点“加入”。", true);
   setRoomControlsDisabled(false);
   setLobbyAction("idle");
@@ -2152,6 +2180,7 @@ function showRoomPanel() {
     setLobbyAction("idle");
     setRoomStatus(message);
     setRoomControlsDisabled(false);
+    setRoomButtonLabels();
   });
 }
 
@@ -2170,6 +2199,7 @@ async function handleCreateRoom() {
   try {
     SFX.click();
     setLobbyAction("creating");
+    setRoomButtonLabels("创建中...", "加入");
     setRoomStatus("正在创建房间，若服务器刚启动可能需要等待几十秒...");
     if (dom.roomCreate) dom.roomCreate.disabled = true;
     if (dom.roomJoin) dom.roomJoin.disabled = true;
@@ -2186,6 +2216,7 @@ async function handleCreateRoom() {
     if (dom.roomCreate) dom.roomCreate.disabled = false;
     if (dom.roomJoin) dom.roomJoin.disabled = false;
     setRoomJoinInputDisabled(false);
+    setRoomButtonLabels("创建房间", "加入");
     setRoomStatus(`房间码: ${resp.code} — 你是房主，等待另一位玩家加入后将自动开始对战。`);
   } catch (error) {
     const fallbackMessage =
@@ -2200,6 +2231,7 @@ async function handleCreateRoom() {
     setLobbyAction("ready");
     setRoomStatus(fallbackMessage);
     setRoomControlsDisabled(false);
+    setRoomButtonLabels();
   }
 }
 
@@ -2217,6 +2249,7 @@ async function handleJoinRoom() {
   try {
     SFX.click();
     setLobbyAction("joining");
+    setRoomButtonLabels("创建房间", "加入中...");
     setRoomStatus(`正在加入房间 ${code}...`);
     if (dom.roomCreate) dom.roomCreate.disabled = true;
     if (dom.roomJoin) dom.roomJoin.disabled = true;
@@ -2233,6 +2266,7 @@ async function handleJoinRoom() {
     if (dom.roomCreate) dom.roomCreate.disabled = false;
     if (dom.roomJoin) dom.roomJoin.disabled = false;
     setRoomJoinInputDisabled(false);
+    setRoomButtonLabels("创建房间", "加入");
     setRoomStatus(`已加入房间 ${resp.code}，正在等待房主开始对战...`);
   } catch (error) {
     const fallbackMessage =
@@ -2247,6 +2281,7 @@ async function handleJoinRoom() {
     setLobbyAction("ready");
     setRoomStatus(fallbackMessage);
     setRoomControlsDisabled(false);
+    setRoomButtonLabels();
   }
 }
 
@@ -2284,6 +2319,11 @@ function bindWelcome() {
   }
 
   if (dom.roomCreate) {
+    dom.roomCreate.addEventListener("pointerdown", () => {
+      if (!dom.roomCreate.disabled) {
+        setRoomStatus("已检测到点击“创建房间”，正在处理...");
+      }
+    });
     dom.roomCreate.addEventListener("click", () => {
       void handleCreateRoom();
     });
@@ -2292,6 +2332,12 @@ function bindWelcome() {
   if (dom.roomJoin && dom.roomCodeInput) {
     dom.roomCodeInput.addEventListener("input", () => {
       dom.roomCodeInput.value = dom.roomCodeInput.value.replace(/\D/g, "").slice(0, 4);
+    });
+
+    dom.roomJoin.addEventListener("pointerdown", () => {
+      if (!dom.roomJoin.disabled) {
+        setRoomStatus("已检测到点击“加入”，正在处理...");
+      }
     });
 
     dom.roomJoin.addEventListener("click", () => {
@@ -2305,6 +2351,20 @@ function bindWelcome() {
     });
   }
 }
+
+window.addEventListener("error", (event) => {
+  const message = event.error?.message || event.message || "未知脚本错误";
+  reportLobbyError(message);
+});
+
+window.addEventListener("unhandledrejection", (event) => {
+  const reason = event.reason;
+  const message =
+    typeof reason === "string"
+      ? reason
+      : reason?.message || "未知 Promise 异常";
+  reportLobbyError(message);
+});
 
 function showSkillModal(tier) {
   if (state.ai.enabled && state.match.currentPlayer === "white") return;
