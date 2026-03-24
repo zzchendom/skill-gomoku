@@ -16,6 +16,51 @@
 - 玩家 vs AI 时可切换 **本地引擎** / **DeepSeek 代理**（通过自建后端转发，见下方接口约定）
 - 附带 **`proxy-server/`** 通用代理：密钥只放服务器，几个朋友共用同一代理 URL；根目录 **`config.js`** 可写默认 `defaultProxyUrl` 方便分发
 
+## 稳定版本
+
+- 当前已测试通过的稳定标签：`v0.1.0`
+- 对应提交：`4f4ef9a`
+- 版本变更记录见 [`CHANGELOG.md`](./CHANGELOG.md)
+
+## 推荐开发流程
+
+为了避免后续更新把线上版本改坏，建议使用下面这套最小流程：
+
+1. `master` 只保留已经测试通过、可以上线的版本。
+2. 每次开发新功能先开分支，例如 `feature/new-skill`、`feature/online-improve`。
+3. 功能测试通过后再合并回 `master`。
+4. 每次确认一版稳定后，打一个标签，例如 `v0.1.1`、`v0.2.0`。
+
+常用命令：
+
+```bash
+git checkout -b feature/xxx
+git checkout master
+git merge feature/xxx
+git tag -a v0.1.1 -m "stable release"
+git push origin v0.1.1
+```
+
+## 出问题时如何回滚
+
+查看所有稳定标签：
+
+```bash
+git tag --list
+```
+
+临时切回某个稳定版本：
+
+```bash
+git checkout v0.1.0
+```
+
+基于稳定版本开一个修复分支：
+
+```bash
+git checkout -b hotfix/v0.1.0-fix v0.1.0
+```
+
 ## 朋友共用的通用代理（小规模推荐）
 
 1. 一人按 [proxy-server/README.md](proxy-server/README.md) 部署服务，设置环境变量 `DEEPSEEK_API_KEY`；建议再加 `FRIEND_TOKEN`，避免公网被陌生人调用。
