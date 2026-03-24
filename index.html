@@ -58,6 +58,7 @@
 
             <div class="board-shell">
               <div id="board" class="board" aria-label="技能五子棋棋盘"></div>
+              <div id="board-toast" class="board-toast hidden" aria-hidden="true"></div>
               <div id="ai-thinking-layer" class="ai-thinking-layer hidden" aria-hidden="true">
                 <div class="ai-thinking-card">
                   <div class="ai-thinking-pulse" aria-hidden="true"></div>
@@ -161,7 +162,10 @@
               <li>棋盘为 15x15，双方轮流落子，先形成 5 连的一方获胜。</li>
               <li>本回合新形成 3 连会触发小技能，本回合新形成 4 连会触发大技能。</li>
               <li>每回合最多触发 1 次技能，技能造成的变化不会在本回合直接判胜。</li>
+              <li>同一方不能连续两步都释放技能。第一次成功放技能时，会弹出冷却规则提醒。</li>
               <li>技能池：玄封、飞沙走石、缩地成寸（小技能）；天崩地裂、移花接木、鲲鹏吞噬（大技能）。</li>
+              <li>随机机制“城乡变形记”：每次下子有 10% 概率突然变成对方颜色，并在棋盘中央弹出搞怪提示。</li>
+              <li>若某一方连续输掉 3 局，将在下一局自动觉醒一次隐藏技能“鬼打墙”：对手形成四连或五连杀机时，会偷走一枚关键敌子。</li>
               <li>玩家 vs AI 模式下可选择「DeepSeek 代理」：由你的后端转发大模型，接口约定见 README。</li>
               <li>键盘：<kbd>N</kbd> 新对局、<kbd>U</kbd> 悔棋、<kbd>S</kbd> 跳过技能、<kbd>Esc</kbd> 取消技能选择。</li>
             </ul>
@@ -234,6 +238,27 @@
       <h2 id="winner-title">胜负已分</h2>
       <p id="winner-text" class="modal-text"></p>
       <button id="modal-new-game" type="button">再来一局</button>
+    </div>
+  </div>
+
+  <div id="notice-modal" class="modal hidden" aria-hidden="true">
+    <div class="modal-card">
+      <p class="eyebrow">规则提醒</p>
+      <h2 id="notice-title">提示</h2>
+      <p id="notice-text" class="modal-text"></p>
+      <button id="notice-confirm" type="button">知道了</button>
+    </div>
+  </div>
+
+  <div id="undo-modal" class="modal hidden" aria-hidden="true">
+    <div class="modal-card">
+      <p class="eyebrow">悔棋请求</p>
+      <h2>对手正在求情</h2>
+      <p id="undo-text" class="modal-text">求求了，让我悔棋吧</p>
+      <div class="undo-actions">
+        <button id="undo-approve" type="button">同意悔棋</button>
+        <button id="undo-reject" type="button" class="ghost-button">拒绝</button>
+      </div>
     </div>
   </div>
 

@@ -322,7 +322,8 @@ io.on("connection", (socket) => {
       whiteToken: null,
       blackDisconnectTimer: null,
       whiteDisconnectTimer: null,
-      started: false
+      started: false,
+      pendingUndo: null
     });
     bindSocketToRoom(socket, code, "black");
     console.log(`[room] ${code} created by ${socket.id}`);
@@ -347,6 +348,7 @@ io.on("connection", (socket) => {
     room.white = socket.id;
     room.whiteToken = generateReconnectToken();
     room.started = true;
+    room.pendingUndo = null;
     bindSocketToRoom(socket, code, "white");
     console.log(`[room] ${code} joined by ${socket.id}`);
 
@@ -367,11 +369,16 @@ io.on("connection", (socket) => {
   socket.on("place-stone", (data) => {
     const found = getRoomBySocket(socket);
     if (!found || !found.room.started) return;
+    const player = socket.id === found.room.black ? "black" : "white";
+    const mutated = Math.random() < 0.1;
+    const placedColor = mutated ? getOpponentRole(player) : player;
 
     io.to(found.code).emit("stone-placed", {
       row: data.row,
       col: data.col,
-      player: socket.id === found.room.black ? "black" : "white"
+      player,
+      placedColor,
+      mutated
     });
   });
 
@@ -401,7 +408,49 @@ io.on("connection", (socket) => {
     const found = getRoomBySocket(socket);
     if (!found || !found.room.started) return;
 
+    found.room.pendingUndo = null;
     io.to(found.code).emit("new-game-sync");
+  });
+
+  socket.on("undo-request", (data) => {
+    const found = getRoomBySocket(socket);
+    if (!found || !found.room.started || !data?.sessionState) return;
+
+    const requesterRole = getSocketRoleInRoom(socket, found.room);
+    const opponentRole = getOpponentRole(requesterRole);
+    const opponentSocketId = getSocketIdByRole(found.room, opponentRole);
+    if (!requesterRole || !opponentSocketId || found.room.pendingUndo) return;
+
+    found.room.pendingUndo = {
+      requesterRole,
+      sessionState: data.sessionState
+    };
+
+    io.to(socket.id).emit("undo-request-pending");
+    io.to(opponentSocketId).emit("undo-requested", {
+      requesterRole
+    });
+  });
+
+  socket.on("undo-response", (data) => {
+    const found = getRoomBySocket(socket);
+    if (!found || !found.room.started || !found.room.pendingUndo) return;
+
+    const responderRole = getSocketRoleInRoom(socket, found.room);
+    const { requesterRole, sessionState } = found.room.pendingUndo;
+    if (!responderRole || responderRole === requesterRole) return;
+
+    const requesterSocketId = getSocketIdByRole(found.room, requesterRole);
+    found.room.pendingUndo = null;
+
+    if (data?.accepted) {
+      io.to(found.code).emit("undo-approved", { sessionState });
+      return;
+    }
+
+    if (requesterSocketId) {
+      io.to(requesterSocketId).emit("undo-rejected");
+    }
   });
 
   socket.on("sync-state", (data) => {
@@ -462,6 +511,13 @@ io.on("connection", (socket) => {
     const timerKey = role === "black" ? "blackDisconnectTimer" : "whiteDisconnectTimer";
 
     room[role] = null;
+    if (
+      room.pendingUndo &&
+      (room.pendingUndo.requesterRole === role ||
+        getOpponentRole(room.pendingUndo.requesterRole) === role)
+    ) {
+      room.pendingUndo = null;
+    }
     clearSocketRoom(socket);
     clearReconnectTimer(room, role);
     room[timerKey] = setTimeout(() => {

@@ -150,6 +150,29 @@ const ROOM_ACK_TIMEOUT_MS = 20000;
 const ONLINE_SERVER_WAKE_TIMEOUT_MS = 65000;
 const ONLINE_SERVER_WAKE_RETRY_MS = 2500;
 const ONLINE_RECONNECT_GRACE_MS = 20000;
+const ONLINE_SOCKET_RECONNECT_ATTEMPTS = 12;
+const ONLINE_SOCKET_RECONNECT_DELAY_MS = 1500;
+const ONLINE_SOCKET_RECONNECT_DELAY_MAX_MS = 5000;
+const COUNTRYSIDE_MORPH_CHANCE = 0.1;
+const GHOST_WALL_SKILL = {
+  id: "ghost-wall",
+  name: "鬼打墙",
+  description: "连输三局后觉醒。本局若对手形成四连或直接五连，会悄然偷走其关键一子并化解杀机。"
+};
+const COUNTRYSIDE_MORPH_SKILL = {
+  id: "countryside-morph",
+  name: "城乡变形记",
+  description: "下子时有 10% 概率突然变成对方颜色，整活全场可见。"
+};
+
+const awakeningProgress = {
+  black: {
+    loseStreak: 0
+  },
+  white: {
+    loseStreak: 0
+  }
+};
 
 function getDefaultProxyUrl() {
   return (
@@ -224,6 +247,7 @@ const onlineLobby = {
 const dom = {
   board: document.querySelector("#board"),
   message: document.querySelector("#message"),
+  boardToast: document.querySelector("#board-toast"),
   modeLabel: document.querySelector("#mode-label"),
   turnLabel: document.querySelector("#turn-label"),
   phaseLabel: document.querySelector("#phase-label"),
@@ -258,6 +282,14 @@ const dom = {
   winnerTitle: document.querySelector("#winner-title"),
   winnerText: document.querySelector("#winner-text"),
   modalNewGame: document.querySelector("#modal-new-game"),
+  noticeModal: document.querySelector("#notice-modal"),
+  noticeTitle: document.querySelector("#notice-title"),
+  noticeText: document.querySelector("#notice-text"),
+  noticeConfirm: document.querySelector("#notice-confirm"),
+  undoModal: document.querySelector("#undo-modal"),
+  undoText: document.querySelector("#undo-text"),
+  undoApprove: document.querySelector("#undo-approve"),
+  undoReject: document.querySelector("#undo-reject"),
   welcomeModal: document.querySelector("#welcome-modal"),
   welcomeModeSelect: document.querySelector("#welcome-mode-select"),
   welcomeRoomPanel: document.querySelector("#welcome-room-panel"),
@@ -278,6 +310,7 @@ function createInitialBoard() {
 }
 
 function createInitialState(mode = "local-pvp") {
+  const loseStreak = structuredClone(awakeningProgress);
   return {
     board: {
       size: BOARD_SIZE,
@@ -304,7 +337,8 @@ function createInitialState(mode = "local-pvp") {
         "欢迎来到技能五子棋：五连获胜，3 连触发小技能，4 连触发大技能。"
       ],
       effects: [],
-      hoverCell: null
+      hoverCell: null,
+      boardToast: null
     },
     ai: {
       enabled: mode === "ai",
@@ -319,7 +353,34 @@ function createInitialState(mode = "local-pvp") {
       enabled: mode === "online",
       myColor: null,
       roomCode: null,
-      chatMessages: []
+      chatMessages: [],
+      undoRequest: {
+        pendingMine: false,
+        pendingIncoming: false
+      }
+    },
+    hidden: {
+      loseStreak,
+      ghostWall: {
+        black: {
+          armed: loseStreak.black.loseStreak >= 3,
+          used: false
+        },
+        white: {
+          armed: loseStreak.white.loseStreak >= 3,
+          used: false
+        }
+      },
+      skillLimits: {
+        black: {
+          lastTurnUsedSkill: false,
+          firstNoticeShown: false
+        },
+        white: {
+          lastTurnUsedSkill: false,
+          firstNoticeShown: false
+        }
+      }
     },
     history: []
   };
@@ -330,6 +391,7 @@ function cloneStateSnapshot() {
     board: structuredClone(state.board),
     match: structuredClone(state.match),
     skill: structuredClone(state.skill),
+    hidden: structuredClone(state.hidden),
     ui: {
       message: state.ui.message,
       logs: [...state.ui.logs],
@@ -354,11 +416,13 @@ function restoreSnapshot(snapshot) {
     board: snapshot.board,
     match: snapshot.match,
     skill: snapshot.skill,
+    hidden: snapshot.hidden,
     ui: {
       message: snapshot.ui.message,
       logs: snapshot.ui.logs,
       effects: [],
-      hoverCell: snapshot.ui.hoverCell
+      hoverCell: snapshot.ui.hoverCell,
+      boardToast: null
     },
     ai: {
       ...state.ai,
@@ -371,6 +435,7 @@ function restoreSnapshot(snapshot) {
       timerId: null
     }
   };
+  syncAwakeningProgressFromState();
 }
 
 function buildOnlineSessionState() {
@@ -378,6 +443,8 @@ function buildOnlineSessionState() {
     board: structuredClone(state.board),
     match: structuredClone(state.match),
     skill: structuredClone(state.skill),
+    hidden: structuredClone(state.hidden),
+    progress: structuredClone(awakeningProgress),
     ui: {
       message: state.ui.message,
       logs: [...state.ui.logs],
@@ -389,6 +456,13 @@ function buildOnlineSessionState() {
 
 function applyOnlineSessionState(sessionState) {
   clearAITimer();
+  if (sessionState.hidden?.loseStreak) {
+    awakeningProgress.black.loseStreak = sessionState.hidden.loseStreak.black?.loseStreak || 0;
+    awakeningProgress.white.loseStreak = sessionState.hidden.loseStreak.white?.loseStreak || 0;
+  } else if (sessionState.progress) {
+    awakeningProgress.black.loseStreak = sessionState.progress.black?.loseStreak || 0;
+    awakeningProgress.white.loseStreak = sessionState.progress.white?.loseStreak || 0;
+  }
   const currentOnline = {
     ...state.online
   };
@@ -401,11 +475,13 @@ function applyOnlineSessionState(sessionState) {
       mode: "online"
     },
     skill: structuredClone(sessionState.skill),
+    hidden: structuredClone(sessionState.hidden),
     ui: {
       message: sessionState.ui.message,
       logs: [...sessionState.ui.logs],
       effects: [],
-      hoverCell: null
+      hoverCell: null,
+      boardToast: null
     },
     ai: {
       ...state.ai,
@@ -414,9 +490,16 @@ function applyOnlineSessionState(sessionState) {
       thinking: false,
       timerId: null
     },
-    online: currentOnline,
+    online: {
+      ...currentOnline,
+      undoRequest: {
+        pendingMine: false,
+        pendingIncoming: false
+      }
+    },
     history: structuredClone(sessionState.history || [])
   };
+  syncAwakeningProgressFromState();
   renderAll();
 }
 
@@ -435,6 +518,126 @@ function pushLog(text) {
 
 function setMessage(text) {
   state.ui.message = text;
+}
+
+function syncAwakeningProgressFromState() {
+  if (!state?.hidden?.loseStreak) {
+    return;
+  }
+
+  awakeningProgress.black.loseStreak = state.hidden.loseStreak.black?.loseStreak || 0;
+  awakeningProgress.white.loseStreak = state.hidden.loseStreak.white?.loseStreak || 0;
+}
+
+function showBoardToast(text, duration = 2400) {
+  const id = Date.now() + Math.random();
+  state.ui.boardToast = { id, text };
+  renderBoardToast();
+  window.setTimeout(() => {
+    if (state.ui.boardToast?.id === id) {
+      state.ui.boardToast = null;
+      renderBoardToast();
+    }
+  }, duration);
+}
+
+function showNoticeModal(title, text) {
+  if (!dom.noticeModal || !dom.noticeTitle || !dom.noticeText) {
+    return;
+  }
+
+  dom.noticeTitle.textContent = title;
+  dom.noticeText.textContent = text;
+  dom.noticeModal.classList.remove("hidden");
+  dom.noticeModal.setAttribute("aria-hidden", "false");
+}
+
+function hideNoticeModal() {
+  if (!dom.noticeModal) {
+    return;
+  }
+
+  dom.noticeModal.classList.add("hidden");
+  dom.noticeModal.setAttribute("aria-hidden", "true");
+}
+
+function renderBoardToast() {
+  if (!dom.boardToast) {
+    return;
+  }
+
+  const activeToast = state.ui.boardToast;
+  dom.boardToast.classList.toggle("hidden", !activeToast);
+  dom.boardToast.setAttribute("aria-hidden", String(!activeToast));
+  dom.boardToast.textContent = activeToast?.text || "";
+}
+
+function hasPendingUndoRequest() {
+  return Boolean(
+    state.online.enabled &&
+    (state.online.undoRequest?.pendingMine || state.online.undoRequest?.pendingIncoming)
+  );
+}
+
+function getSkillLimitState(player) {
+  if (!state.hidden.skillLimits) {
+    state.hidden.skillLimits = {
+      black: {
+        lastTurnUsedSkill: false,
+        firstNoticeShown: false
+      },
+      white: {
+        lastTurnUsedSkill: false,
+        firstNoticeShown: false
+      }
+    };
+  }
+
+  if (!state.hidden.skillLimits[player]) {
+    state.hidden.skillLimits[player] = {
+      lastTurnUsedSkill: false,
+      firstNoticeShown: false
+    };
+  }
+
+  return state.hidden.skillLimits[player];
+}
+
+function noteTurnSkillUsage(player, usedSkill) {
+  const limitState = getSkillLimitState(player);
+  limitState.lastTurnUsedSkill = Boolean(usedSkill);
+}
+
+function isSkillReleaseLocked(player) {
+  return Boolean(getSkillLimitState(player).lastTurnUsedSkill);
+}
+
+function maybeShowFirstSkillLimitNotice(player) {
+  const limitState = getSkillLimitState(player);
+  if (limitState.firstNoticeShown) {
+    return;
+  }
+
+  limitState.firstNoticeShown = true;
+  showNoticeModal(
+    "灵技冷却提醒",
+    "提示：同一方不能连续两步都释放技能。你这一步已经用过技能，下次轮到你时即使触发技能，也必须先空过一次。"
+  );
+}
+
+function shouldMorphStone() {
+  return Math.random() < COUNTRYSIDE_MORPH_CHANCE;
+}
+
+function getCountrysideMorphToast(actor, placedColor) {
+  const actorName = state.online.enabled
+    ? actor === state.online.myColor
+      ? "你"
+      : "对手"
+    : PLAYER_LABELS[actor];
+  const colorName = placedColor === "black" ? "黑子" : "白子";
+
+  return `“${COUNTRYSIDE_MORPH_SKILL.name}”发动！${actorName} 这手突然下成了${colorName}。`;
 }
 
 function hasBlockedCell(row, col, player) {
@@ -562,13 +765,13 @@ function renderStatus() {
     const spark = state.skill.pendingTrigger.tier === "small" ? "3 连小技能" : "4 连大技能";
     dom.triggerLabel.textContent = `${spark} 已点亮`;
   } else {
-    dom.triggerLabel.textContent = "等待连段触发";
+    dom.triggerLabel.textContent = getGhostWallStatusText() || "等待连段触发";
   }
 
   dom.blackBadge.classList.toggle("active", state.match.currentPlayer === "black");
   dom.whiteBadge.classList.toggle("active", state.match.currentPlayer === "white");
   dom.message.textContent = state.ui.message;
-  dom.undoMove.disabled = state.history.length === 0;
+  dom.undoMove.disabled = state.history.length === 0 || hasPendingUndoRequest();
   dom.skipSkill.disabled = !state.skill.pendingTrigger;
   if (dom.chatInput) {
     dom.chatInput.disabled = !state.online.enabled;
@@ -699,6 +902,22 @@ function appendChatMessage(player, text, timestamp = Date.now()) {
     timestamp
   });
   state.online.chatMessages = state.online.chatMessages.slice(-40);
+}
+
+function getChatToastText(player, text) {
+  if (!state.online.enabled) {
+    return text;
+  }
+
+  if (player === state.online.myColor) {
+    return `你：${text}`;
+  }
+
+  if (player === "black" || player === "white") {
+    return `对手：${text}`;
+  }
+
+  return text;
 }
 
 function renderChat() {
@@ -964,10 +1183,34 @@ function renderWinnerModal() {
   }
 
   dom.winnerTitle.textContent = `${PLAYER_LABELS[state.match.winner]} 获胜`;
-  dom.winnerText.textContent =
+  const loser = getOpponent(state.match.winner);
+  const loserStreak = state.hidden?.loseStreak?.[loser]?.loseStreak ?? awakeningProgress[loser].loseStreak;
+  let text =
     state.match.winner === "black"
       ? "夜幕执子完成了终局五连。下一局试试抢先打出 4 连大技能。"
       : "星辉执子完成了终局五连。下一局可以尝试围绕中心布局更快触发技能。";
+
+  if (loserStreak >= 3) {
+    text += isOwnPerspective(loser)
+      ? ` ${PLAYER_LABELS[loser]} 已连输 ${loserStreak} 局，下一局将觉醒隐藏技能“${GHOST_WALL_SKILL.name}”。`
+      : " 下一局局势仍可能出现异变。";
+  }
+
+  dom.winnerText.textContent = text;
+}
+
+function renderUndoModal() {
+  if (!dom.undoModal || !dom.undoText) {
+    return;
+  }
+
+  const visible = Boolean(state.online.undoRequest?.pendingIncoming);
+  dom.undoModal.classList.toggle("hidden", !visible);
+  dom.undoModal.setAttribute("aria-hidden", String(!visible));
+
+  if (visible) {
+    dom.undoText.textContent = "求求了，让我悔棋吧";
+  }
 }
 
 function renderAll() {
@@ -976,7 +1219,9 @@ function renderAll() {
   renderLogs();
   renderChat();
   renderBoard();
+  renderBoardToast();
   renderWinnerModal();
+  renderUndoModal();
   maybeRunAI();
 }
 
@@ -1361,7 +1606,107 @@ function analyzeMove(row, col, player) {
   return { outcome: "plain", cells: longestLine };
 }
 
+function isGhostWallThreat(result) {
+  return (
+    result.outcome === "win" ||
+    (result.outcome === "trigger" && result.tier === "large")
+  );
+}
+
+function getGhostWallVictimCell(result, preferredRow, preferredCol) {
+  if (!result?.cells?.length) {
+    return null;
+  }
+
+  const preferred = result.cells.find(
+    ([row, col]) => row === preferredRow && col === preferredCol
+  );
+
+  if (preferred) {
+    return preferred;
+  }
+
+  return result.cells[result.cells.length - 1];
+}
+
+function maybeTriggerGhostWall(attacker, result, row, col) {
+  const defender = getOpponent(attacker);
+  const ghostState = state.hidden.ghostWall[defender];
+
+  if (!ghostState?.armed || ghostState.used || !isGhostWallThreat(result)) {
+    return false;
+  }
+
+  const victim = getGhostWallVictimCell(result, row, col);
+  if (!victim) {
+    return false;
+  }
+
+  const [victimRow, victimCol] = victim;
+  if (state.board.cells[victimRow][victimCol] !== attacker) {
+    return false;
+  }
+
+  state.board.cells[victimRow][victimCol] = null;
+  state.board.lastMove = { row: victimRow, col: victimCol };
+  state.board.winningLine = [];
+  state.skill.pendingTrigger = null;
+  state.skill.selectedSkill = null;
+  state.skill.warpSource = null;
+  ghostState.used = true;
+
+  if (isOwnPerspective(defender)) {
+    setMessage(`鬼打墙已觉醒：${PLAYER_LABELS[defender]} 在暗影中偷走了一枚关键敌子。`);
+    pushLog(`${PLAYER_LABELS[defender]} 的隐藏技能“${GHOST_WALL_SKILL.name}”悄然发动，化解了致命威胁。`);
+  } else {
+    setMessage("棋盘忽起迷障，一枚关键棋子悄然消失了。");
+    pushLog("棋局异动化解了一次致命威胁。");
+  }
+  queueEffect([[victimRow, victimCol]], "convert", 700);
+  return true;
+}
+
+function updateAwakeningProgress(winner) {
+  const loser = getOpponent(winner);
+  if (!state.hidden?.loseStreak) {
+    state.hidden = {
+      ...state.hidden,
+      loseStreak: structuredClone(awakeningProgress)
+    };
+  }
+
+  state.hidden.loseStreak[winner].loseStreak = 0;
+  state.hidden.loseStreak[loser].loseStreak += 1;
+  syncAwakeningProgressFromState();
+}
+
+function isOwnPerspective(player) {
+  return !state.online.enabled || state.online.myColor === player;
+}
+
+function getGhostWallStatusText() {
+  const readyPlayers = Object.entries(state.hidden.ghostWall)
+    .filter(([, ghostState]) => ghostState.armed && !ghostState.used)
+    .map(([player]) => player);
+
+  if (!readyPlayers.length) {
+    return "";
+  }
+
+  if (!state.online.enabled) {
+    return `${readyPlayers.map((player) => PLAYER_LABELS[player]).join("、")} 持有隐藏技能“${GHOST_WALL_SKILL.name}”`;
+  }
+
+  if (readyPlayers.includes(state.online.myColor)) {
+    return `你的隐藏技能“${GHOST_WALL_SKILL.name}”待命`;
+  }
+
+  return "棋局暗流涌动";
+}
+
 function endGame(player, winningLine) {
+  updateAwakeningProgress(player);
+  noteTurnSkillUsage(player, false);
   state.match.status = "finished";
   state.match.winner = player;
   state.board.winningLine = winningLine.map(([row, col]) => ({ row, col }));
@@ -1391,7 +1736,7 @@ function advanceTurn() {
   }
 }
 
-function placeStone(row, col) {
+function placeStone(row, col, options = {}) {
   if (state.match.status === "finished") {
     return;
   }
@@ -1401,7 +1746,10 @@ function placeStone(row, col) {
     return;
   }
 
-  const currentPlayer = state.match.currentPlayer;
+  const currentPlayer = options.actorPlayer || state.match.currentPlayer;
+  const placedColor =
+    options.placedColor || (shouldMorphStone() ? getOpponent(currentPlayer) : currentPlayer);
+  const transformed = placedColor !== currentPlayer;
 
   if (state.board.cells[row][col]) {
     setMessage("这个位置已经有棋子了，请换一个落点。");
@@ -1414,22 +1762,53 @@ function placeStone(row, col) {
   }
 
   state.history.push(cloneStateSnapshot());
-  state.board.cells[row][col] = currentPlayer;
+  state.board.cells[row][col] = placedColor;
   state.board.lastMove = { row, col };
   clearExpiredBlocks(currentPlayer);
-  pushLog(`${PLAYER_LABELS[currentPlayer]} 落子到 (${row + 1}, ${col + 1})。`);
+  pushLog(
+    transformed
+      ? `${PLAYER_LABELS[currentPlayer]} 触发“${COUNTRYSIDE_MORPH_SKILL.name}”，在 (${row + 1}, ${col + 1}) 下成了${PLAYER_LABELS[placedColor]}的棋子。`
+      : `${PLAYER_LABELS[currentPlayer]} 落子到 (${row + 1}, ${col + 1})。`
+  );
+  if (transformed) {
+    showBoardToast(getCountrysideMorphToast(currentPlayer, placedColor), 2600);
+    setMessage(`“${COUNTRYSIDE_MORPH_SKILL.name}”发动，这一手变成了${PLAYER_LABELS[placedColor]}的棋子。`);
+  }
   SFX.place();
 
-  const result = analyzeMove(row, col, currentPlayer);
+  const result = analyzeMove(row, col, placedColor);
+
+  if (maybeTriggerGhostWall(placedColor, result, row, col)) {
+    noteTurnSkillUsage(currentPlayer, false);
+    const defender = getOpponent(placedColor);
+    advanceTurn();
+    if (isOwnPerspective(defender)) {
+      setMessage(`鬼打墙已生效：${PLAYER_LABELS[defender]} 已偷走敌方关键一子，轮到下一手。`);
+    } else {
+      setMessage("局势突变，关键一子已经消失，轮到下一手。");
+    }
+    renderAll();
+    return;
+  }
 
   if (result.outcome === "win") {
-    endGame(currentPlayer, result.cells);
+    endGame(placedColor, result.cells);
     SFX.win();
     renderAll();
     return;
   }
 
-  if (result.outcome === "trigger") {
+  if (result.outcome === "trigger" && placedColor === currentPlayer) {
+    if (isSkillReleaseLocked(currentPlayer)) {
+      noteTurnSkillUsage(currentPlayer, false);
+      setMessage("灵技冷却中：你上一回合已经释放过技能，本回合不能连续释放。");
+      pushLog(`${PLAYER_LABELS[currentPlayer]} 触发了技能窗口，但因连续施法限制被强制跳过。`);
+      showBoardToast("灵技冷却中，本回合不能连续放技能。", 2400);
+      advanceTurn();
+      renderAll();
+      return;
+    }
+
     state.skill.pendingTrigger = {
       tier: result.tier,
       source: { row, col },
@@ -1449,6 +1828,7 @@ function placeStone(row, col) {
     return;
   }
 
+  noteTurnSkillUsage(currentPlayer, false);
   advanceTurn();
   renderAll();
 }
@@ -1650,6 +2030,8 @@ function tryApplySkill(row, col) {
     return;
   }
 
+  maybeShowFirstSkillLimitNotice(state.match.currentPlayer);
+  noteTurnSkillUsage(state.match.currentPlayer, true);
   SFX.skillCast(skillId);
   advanceTurn();
   renderAll();
@@ -1657,6 +2039,16 @@ function tryApplySkill(row, col) {
 
 function handleBoardClick(row, col) {
   if (state.match.status === "finished") {
+    return;
+  }
+
+  if (hasPendingUndoRequest()) {
+    setMessage(
+      state.online.undoRequest?.pendingMine
+        ? "悔棋申请已发出，请等待对手确认。"
+        : "对手正在请求悔棋，请先处理确认。"
+    );
+    renderStatus();
     return;
   }
 
@@ -1749,6 +2141,12 @@ function updateBoardHoverState() {
 }
 
 function resetGame() {
+  if (hasPendingUndoRequest()) {
+    setMessage("当前有待处理的悔棋请求，请先完成确认。");
+    renderAll();
+    return;
+  }
+
   if (state.online.enabled && onlineSocket) {
     onlineSocket.emit("new-game-request");
     return;
@@ -1758,6 +2156,7 @@ function resetGame() {
 
 function doResetGame() {
   clearAITimer();
+  syncAwakeningProgressFromState();
   const mode = state.match.mode;
   const difficulty = state.ai.difficulty;
   const engine = state.ai.engine;
@@ -1766,6 +2165,30 @@ function doResetGame() {
   state.ai.difficulty = difficulty;
   state.ai.engine = engine === "proxy" ? "proxy" : "local";
   state.online = onlineState;
+  state.online.undoRequest = {
+    pendingMine: false,
+    pendingIncoming: false
+  };
+  const myGhostArmed =
+    state.online.enabled && state.online.myColor
+      ? state.hidden.ghostWall[state.online.myColor]?.armed
+      : false;
+  const anyGhostArmed = Object.values(state.hidden.ghostWall).some((ghostState) => ghostState.armed);
+  if (!state.online.enabled) {
+    const awakenedPlayers = Object.entries(state.hidden.ghostWall)
+      .filter(([, ghostState]) => ghostState.armed)
+      .map(([player]) => PLAYER_LABELS[player]);
+    if (awakenedPlayers.length) {
+      pushLog(`${awakenedPlayers.join("、")} 已觉醒隐藏技能“${GHOST_WALL_SKILL.name}”。`);
+      setMessage(`新一局开始：${awakenedPlayers.join("、")} 可在危局中触发“${GHOST_WALL_SKILL.name}”。`);
+    }
+  } else if (myGhostArmed) {
+    pushLog(`你已觉醒隐藏技能“${GHOST_WALL_SKILL.name}”。`);
+    setMessage(`新一局开始：你的“${GHOST_WALL_SKILL.name}”已待命，可在危局中自动触发。`);
+  } else if (anyGhostArmed) {
+    pushLog("棋局深处似乎有异象在酝酿。");
+    setMessage("新一局开始：棋局暗流涌动，小心看不见的变数。");
+  }
   SFX.newGame();
   renderAll();
 }
@@ -1773,6 +2196,16 @@ function doResetGame() {
 function undoMove() {
   clearAITimer();
   if (state.online.enabled) {
+    if (hasPendingUndoRequest()) {
+      setMessage(
+        state.online.undoRequest?.pendingMine
+          ? "悔棋申请已发出，请等待对手确认。"
+          : "对手正在等待你的悔棋确认。"
+      );
+      renderAll();
+      return;
+    }
+
     if (!state.history.length) {
       setMessage("还没有可悔的棋步。");
       renderAll();
@@ -1787,15 +2220,22 @@ function undoMove() {
         mode: "online"
       },
       skill: structuredClone(snapshot.skill),
+      hidden: structuredClone(snapshot.hidden),
+      progress: structuredClone(awakeningProgress),
       ui: {
         message: "悔棋成功。你可以重新思考这一手。",
         logs: ["已回退到上一步状态。", ...snapshot.ui.logs].slice(0, 8)
       },
       history: structuredClone(state.history.slice(0, -1))
     };
-
-    applyOnlineSessionState(sessionState);
-    emitStateSync(sessionState);
+    state.online.undoRequest = {
+      pendingMine: true,
+      pendingIncoming: false
+    };
+    setMessage("悔棋申请已发出，等待对手确认。");
+    pushLog("你发起了悔棋申请。");
+    renderAll();
+    emitUndoRequest(sessionState);
     return;
   }
 
@@ -1813,6 +2253,12 @@ function undoMove() {
 }
 
 function skipSkill() {
+  if (hasPendingUndoRequest()) {
+    setMessage("当前有待处理的悔棋请求，请先完成确认。");
+    renderAll();
+    return;
+  }
+
   if (!state.skill.pendingTrigger) {
     setMessage("当前没有可跳过的技能窗口。");
     renderAll();
@@ -1832,6 +2278,7 @@ function doSkipSkill() {
   state.skill.warpSource = null;
   pushLog(`${PLAYER_LABELS[state.match.currentPlayer]} 放弃了本回合技能。`);
   setMessage("你跳过了技能窗口，回合将正常切换。");
+  noteTurnSkillUsage(state.match.currentPlayer, false);
   advanceTurn();
   renderAll();
 }
@@ -1944,8 +2391,33 @@ function bindEvents() {
   });
   dom.newGame.addEventListener("click", resetGame);
   dom.modalNewGame.addEventListener("click", resetGame);
+  if (dom.noticeConfirm) {
+    dom.noticeConfirm.addEventListener("click", hideNoticeModal);
+  }
   dom.undoMove.addEventListener("click", undoMove);
   dom.skipSkill.addEventListener("click", skipSkill);
+  if (dom.undoApprove) {
+    dom.undoApprove.addEventListener("click", () => {
+      state.online.undoRequest = {
+        pendingMine: false,
+        pendingIncoming: false
+      };
+      emitUndoResponse(true);
+      setMessage("你已同意对手悔棋，正在同步棋局。");
+      renderAll();
+    });
+  }
+  if (dom.undoReject) {
+    dom.undoReject.addEventListener("click", () => {
+      state.online.undoRequest = {
+        pendingMine: false,
+        pendingIncoming: false
+      };
+      emitUndoResponse(false);
+      setMessage("你拒绝了这次悔棋请求。");
+      renderAll();
+    });
+  }
   if (dom.chatSend) {
     dom.chatSend.addEventListener("click", handleSendChat);
   }
@@ -2054,6 +2526,18 @@ function emitStateSync(sessionState, targetRole = null) {
 function emitChatMessage(text) {
   if (onlineSocket) {
     onlineSocket.emit("chat-message", { text });
+  }
+}
+
+function emitUndoRequest(sessionState) {
+  if (onlineSocket) {
+    onlineSocket.emit("undo-request", { sessionState });
+  }
+}
+
+function emitUndoResponse(accepted) {
+  if (onlineSocket) {
+    onlineSocket.emit("undo-response", { accepted });
   }
 }
 
@@ -2224,6 +2708,31 @@ function emitSocketAck(eventName, payload, timeoutMs = ROOM_ACK_TIMEOUT_MS) {
 }
 
 function bindOnlineSocketEvents(socket) {
+  if (socket.io) {
+    socket.io.on("reconnect_attempt", (attempt) => {
+      if (state.online.enabled) {
+        setMessage(`联机连接波动，正在尝试第 ${attempt} 次重连...`);
+        renderAll();
+      } else if (dom.welcomeRoomPanel && !dom.welcomeRoomPanel.hidden) {
+        setLobbyAction("reconnecting");
+        setRoomStatus(`联机连接波动，正在尝试第 ${attempt} 次重连...`);
+      }
+    });
+
+    socket.io.on("reconnect_failed", () => {
+      if (state.online.enabled) {
+        pushLog("联机自动重连失败，已超过最大尝试次数。");
+        setMessage("联机自动重连失败，请稍后重新进入房间。");
+        renderAll();
+      } else if (dom.welcomeRoomPanel && !dom.welcomeRoomPanel.hidden) {
+        setLobbyAction("error");
+        setRoomStatus("联机自动重连失败，请稍后重试创建或加入房间。");
+        setRoomControlsDisabled(false);
+        setRoomButtonLabels();
+      }
+    });
+  }
+
   socket.on("connect", () => {
     if (!state.online.enabled) {
       if (onlineLobby.action === "connecting") {
@@ -2274,7 +2783,10 @@ function bindOnlineSocketEvents(socket) {
   socket.on("stone-placed", (data) => {
     if (state.match.status === "finished") return;
     if (state.board.cells[data.row][data.col]) return;
-    placeStone(data.row, data.col);
+    placeStone(data.row, data.col, {
+      actorPlayer: data.player,
+      placedColor: data.placedColor || data.player
+    });
   });
 
   socket.on("skill-used", (data) => {
@@ -2293,6 +2805,52 @@ function bindOnlineSocketEvents(socket) {
 
   socket.on("new-game-sync", () => {
     doResetGame();
+  });
+
+  socket.on("undo-requested", () => {
+    state.online.undoRequest = {
+      pendingMine: false,
+      pendingIncoming: true
+    };
+    pushLog("对手发来了悔棋请求。");
+    setMessage("对手发来悔棋请求，请先确认。");
+    showBoardToast("求求了，让我悔棋吧", 2600);
+    renderAll();
+  });
+
+  socket.on("undo-request-pending", () => {
+    state.online.undoRequest = {
+      pendingMine: true,
+      pendingIncoming: false
+    };
+    setMessage("悔棋申请已送达，等待对手确认。");
+    renderAll();
+  });
+
+  socket.on("undo-approved", (data) => {
+    state.online.undoRequest = {
+      pendingMine: false,
+      pendingIncoming: false
+    };
+
+    if (data?.sessionState) {
+      applyOnlineSessionState(data.sessionState);
+      pushLog("对手同意了悔棋请求，棋局已回退一步。");
+      setMessage("悔棋已生效，棋局已回退一步。");
+      showBoardToast("悔棋已生效", 2200);
+      renderAll();
+    }
+  });
+
+  socket.on("undo-rejected", () => {
+    state.online.undoRequest = {
+      pendingMine: false,
+      pendingIncoming: false
+    };
+    pushLog("对手拒绝了悔棋请求。");
+    setMessage("对手拒绝了你的悔棋请求。");
+    showBoardToast("对手拒绝了悔棋", 2200);
+    renderAll();
   });
 
   socket.on("state-sync", (data) => {
@@ -2323,10 +2881,15 @@ function bindOnlineSocketEvents(socket) {
     }
 
     appendChatMessage(data.player, data.text, data.timestamp);
-    renderChat();
+    showBoardToast(getChatToastText(data.player, data.text), 2400);
+    renderAll();
   });
 
   socket.on("opponent-disconnected", () => {
+    state.online.undoRequest = {
+      pendingMine: false,
+      pendingIncoming: false
+    };
     if (!state.online.enabled) {
       setLobbyAction("ready");
       setRoomStatus("对手已离开，房间已失效，请重新创建或加入。");
@@ -2342,6 +2905,10 @@ function bindOnlineSocketEvents(socket) {
 
   socket.on("disconnect", (reason) => {
     onlineLobby.connectPromise = null;
+    state.online.undoRequest = {
+      pendingMine: false,
+      pendingIncoming: false
+    };
 
     if (reason === "io client disconnect") {
       return;
@@ -2357,7 +2924,7 @@ function bindOnlineSocketEvents(socket) {
 
     if (state.online.enabled) {
       pushLog(`联机连接已断开：${reason}`);
-      setMessage("联机连接已断开，请返回房间面板后重新进入。");
+      setMessage(`联机连接已断开，正在尝试在 ${Math.round(ONLINE_RECONNECT_GRACE_MS / 1000)} 秒内自动恢复...`);
       renderAll();
     }
   });
@@ -2401,8 +2968,10 @@ async function ensureOnlineSocket() {
       transports: ["websocket", "polling"],
       timeout: 20000,
       reconnection: true,
-      reconnectionAttempts: 3,
-      reconnectionDelay: 1500
+      reconnectionAttempts: ONLINE_SOCKET_RECONNECT_ATTEMPTS,
+      reconnectionDelay: ONLINE_SOCKET_RECONNECT_DELAY_MS,
+      reconnectionDelayMax: ONLINE_SOCKET_RECONNECT_DELAY_MAX_MS,
+      randomizationFactor: 0.35
     });
 
     bindOnlineSocketEvents(socket);
