@@ -75,59 +75,49 @@
             <p id="message" class="message">
               先占据中心，争取做出 3 连来点亮技能面板。
             </p>
+
+            <section class="sidebar-card controls-card board-controls">
+              <h2>对局控制</h2>
+              <div class="mode-switch" aria-label="对局模式切换">
+                <button id="mode-local" type="button" class="mode-button active">本地双人</button>
+                <button id="mode-ai" type="button" class="mode-button">玩家 vs AI</button>
+              </div>
+              <div id="ai-difficulty-row" class="difficulty-row" hidden>
+                <span class="difficulty-label">AI 难度</span>
+                <div class="difficulty-buttons" role="group" aria-label="AI 难度">
+                  <button type="button" class="difficulty-button" data-difficulty="easy">休闲</button>
+                  <button type="button" class="difficulty-button active" data-difficulty="normal">标准</button>
+                  <button type="button" class="difficulty-button" data-difficulty="hard">硬核</button>
+                </div>
+              </div>
+              <div id="ai-engine-row" class="ai-engine-row" hidden>
+                <span class="difficulty-label">AI 决策</span>
+                <div class="engine-switch" role="group" aria-label="AI 决策来源">
+                  <button type="button" id="engine-local" class="engine-button active">本地引擎</button>
+                  <button type="button" id="engine-proxy" class="engine-button">DeepSeek 代理</button>
+                </div>
+                <div id="ai-proxy-panel" class="ai-proxy-panel hidden">
+                  <label class="proxy-field">
+                    <span>代理 URL</span>
+                    <input id="proxy-url" type="url" autocomplete="off" placeholder="https://你的域名/api/gomoku-move">
+                  </label>
+                  <label class="proxy-field">
+                    <span>可选：Bearer Token</span>
+                    <input id="proxy-token" type="password" autocomplete="off" placeholder="仅保存在本机浏览器会话">
+                  </label>
+                  <button id="proxy-save" type="button" class="proxy-save-btn">保存到浏览器会话</button>
+                </div>
+              </div>
+              <div class="toolbar">
+                <button id="new-game" type="button">新对局</button>
+                <button id="undo-move" type="button">悔棋</button>
+                <button id="skip-skill" type="button">跳过技能</button>
+              </div>
+            </section>
           </div>
         </section>
 
         <aside class="sidebar">
-          <section class="sidebar-card shortcuts-card">
-            <h2>快捷键</h2>
-            <ul class="shortcut-list">
-              <li><kbd>N</kbd> 新对局</li>
-              <li><kbd>U</kbd> 悔棋</li>
-              <li><kbd>S</kbd> 跳过技能（有技能窗口时）</li>
-              <li><kbd>Esc</kbd> 取消已选技能</li>
-            </ul>
-          </section>
-
-          <section class="sidebar-card controls-card">
-            <h2>对局控制</h2>
-            <div class="mode-switch" aria-label="对局模式切换">
-              <button id="mode-local" type="button" class="mode-button active">本地双人</button>
-              <button id="mode-ai" type="button" class="mode-button">玩家 vs AI</button>
-            </div>
-            <div id="ai-difficulty-row" class="difficulty-row" hidden>
-              <span class="difficulty-label">AI 难度</span>
-              <div class="difficulty-buttons" role="group" aria-label="AI 难度">
-                <button type="button" class="difficulty-button" data-difficulty="easy">休闲</button>
-                <button type="button" class="difficulty-button active" data-difficulty="normal">标准</button>
-                <button type="button" class="difficulty-button" data-difficulty="hard">硬核</button>
-              </div>
-            </div>
-            <div id="ai-engine-row" class="ai-engine-row" hidden>
-              <span class="difficulty-label">AI 决策</span>
-              <div class="engine-switch" role="group" aria-label="AI 决策来源">
-                <button type="button" id="engine-local" class="engine-button active">本地引擎</button>
-                <button type="button" id="engine-proxy" class="engine-button">DeepSeek 代理</button>
-              </div>
-              <div id="ai-proxy-panel" class="ai-proxy-panel hidden">
-                <label class="proxy-field">
-                  <span>代理 URL</span>
-                  <input id="proxy-url" type="url" autocomplete="off" placeholder="https://你的域名/api/gomoku-move">
-                </label>
-                <label class="proxy-field">
-                  <span>可选：Bearer Token</span>
-                  <input id="proxy-token" type="password" autocomplete="off" placeholder="仅保存在本机浏览器会话">
-                </label>
-                <button id="proxy-save" type="button" class="proxy-save-btn">保存到浏览器会话</button>
-              </div>
-            </div>
-            <div class="toolbar">
-              <button id="new-game" type="button">新对局</button>
-              <button id="undo-move" type="button">悔棋</button>
-              <button id="skip-skill" type="button">跳过技能</button>
-            </div>
-          </section>
-
           <section class="sidebar-card skills-card">
             <div class="card-head">
               <h2>技能栏</h2>
@@ -160,6 +150,7 @@
             <summary>规则与技能说明</summary>
             <ul class="rules-list">
               <li>棋盘为 15x15，双方轮流落子，先形成 5 连的一方获胜。</li>
+              <li>每局开始前会随机抽一个“定先手小游戏”，双方各做一步，决定谁先动手。</li>
               <li>本回合新形成 3 连会触发小技能，本回合新形成 4 连会触发大技能。</li>
               <li>每回合最多触发 1 次技能，技能造成的变化不会在本回合直接判胜。</li>
               <li>同一方不能连续两步都释放技能。第一次成功放技能时，会弹出冷却规则提醒。</li>
@@ -170,6 +161,16 @@
               <li>键盘：<kbd>N</kbd> 新对局、<kbd>U</kbd> 悔棋、<kbd>S</kbd> 跳过技能、<kbd>Esc</kbd> 取消技能选择。</li>
             </ul>
           </details>
+
+          <section class="sidebar-card shortcuts-card">
+            <h2>快捷键</h2>
+            <ul class="shortcut-list">
+              <li><kbd>N</kbd> 新对局</li>
+              <li><kbd>U</kbd> 悔棋</li>
+              <li><kbd>S</kbd> 跳过技能（有技能窗口时）</li>
+              <li><kbd>Esc</kbd> 取消已选技能</li>
+            </ul>
+          </section>
         </aside>
       </div>
     </section>
@@ -247,6 +248,16 @@
       <h2 id="notice-title">提示</h2>
       <p id="notice-text" class="modal-text"></p>
       <button id="notice-confirm" type="button">知道了</button>
+    </div>
+  </div>
+
+  <div id="opening-game-modal" class="modal hidden" aria-hidden="true">
+    <div class="modal-card opening-game-card">
+      <p class="eyebrow">开局小游戏</p>
+      <h2 id="opening-game-title">正在抽签先手</h2>
+      <p id="opening-game-desc" class="modal-text">双方各做一步，看看谁先开局。</p>
+      <div id="opening-game-buttons" class="opening-game-buttons"></div>
+      <p id="opening-game-status" class="opening-game-status">正在准备小游戏...</p>
     </div>
   </div>
 

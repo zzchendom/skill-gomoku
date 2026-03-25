@@ -211,6 +211,258 @@ function getOpponentRole(role) {
   return role === "black" ? "white" : "black";
 }
 
+const OPENING_GAMES = [
+  {
+    id: "fast-click",
+    title: "手速碰瓷赛",
+    description: "谁先拍下“我先来”，谁就拿到先手。",
+    buttons: [{ id: "tap", label: "我先来" }],
+    resolveMode: "speed-first"
+  },
+  {
+    id: "slow-click",
+    title: "谦让杯",
+    description: "谁最后按下“您先请”，谁反而先手。",
+    buttons: [{ id: "wait", label: "您先请" }],
+    resolveMode: "speed-last"
+  },
+  {
+    id: "dice-high",
+    title: "骰子莽夫局",
+    description: "一键掷骰，点数大的先走。",
+    buttons: [{ id: "roll", label: "掷骰子" }],
+    resolveMode: "roll-high"
+  },
+  {
+    id: "dice-low",
+    title: "反向欧皇局",
+    description: "谁摇得更小谁先手。",
+    buttons: [{ id: "roll", label: "反向掷骰" }],
+    resolveMode: "roll-low"
+  },
+  {
+    id: "coin",
+    title: "硬币甩锅术",
+    description: "猜正反面，猜中者先手；否则看出手速度。",
+    buttons: [
+      { id: "heads", label: "正面" },
+      { id: "tails", label: "反面" }
+    ],
+    resolveMode: "coin"
+  },
+  {
+    id: "parity",
+    title: "单还是双",
+    description: "猜系统摇出的数字是单还是双。",
+    buttons: [
+      { id: "odd", label: "单数" },
+      { id: "even", label: "双数" }
+    ],
+    resolveMode: "parity"
+  },
+  {
+    id: "door",
+    title: "土味幸运门",
+    description: "三选一，猜中幸运门就先手。",
+    buttons: [
+      { id: "left", label: "踹左门" },
+      { id: "middle", label: "踹中门" },
+      { id: "right", label: "踹右门" }
+    ],
+    resolveMode: "door"
+  },
+  {
+    id: "rps",
+    title: "塑料猜拳王",
+    description: "石头剪刀布，一把定先手。",
+    buttons: [
+      { id: "rock", label: "石头" },
+      { id: "paper", label: "布" },
+      { id: "scissors", label: "剪刀" }
+    ],
+    resolveMode: "rps"
+  },
+  {
+    id: "mood",
+    title: "老板心情测试",
+    description: "猜老板今天更想看“开工”还是“摸鱼”。",
+    buttons: [
+      { id: "work", label: "开工" },
+      { id: "slack", label: "摸鱼" }
+    ],
+    resolveMode: "mood"
+  }
+];
+
+function pickOpeningGame() {
+  return OPENING_GAMES[Math.floor(Math.random() * OPENING_GAMES.length)];
+}
+
+function createOpeningGameRound() {
+  const game = pickOpeningGame();
+  return {
+    roundId: generateReconnectToken(),
+    gameId: game.id,
+    actions: {
+      black: null,
+      white: null
+    }
+  };
+}
+
+function getOpeningGameById(id) {
+  return OPENING_GAMES.find((game) => game.id === id) || null;
+}
+
+function createOpeningActionRecord(game, actionId) {
+  const record = {
+    id: actionId,
+    submittedAt: Date.now()
+  };
+
+  if (game.resolveMode === "roll-high" || game.resolveMode === "roll-low") {
+    record.roll = 1 + Math.floor(Math.random() * 6);
+  }
+
+  return record;
+}
+
+function pickStarterByTime(actions, preferLatest = false) {
+  const blackAction = actions.black;
+  const whiteAction = actions.white;
+
+  if (!blackAction && !whiteAction) return "black";
+  if (!whiteAction) return "black";
+  if (!blackAction) return "white";
+  if (blackAction.submittedAt === whiteAction.submittedAt) {
+    return Math.random() < 0.5 ? "black" : "white";
+  }
+
+  if (preferLatest) {
+    return blackAction.submittedAt > whiteAction.submittedAt ? "black" : "white";
+  }
+
+  return blackAction.submittedAt < whiteAction.submittedAt ? "black" : "white";
+}
+
+function resolveRpsWinner(blackPick, whitePick) {
+  if (blackPick === whitePick) {
+    return null;
+  }
+
+  const winningMap = {
+    rock: "scissors",
+    paper: "rock",
+    scissors: "paper"
+  };
+
+  return winningMap[blackPick] === whitePick ? "black" : "white";
+}
+
+function resolveOpeningGameResult(round) {
+  const game = getOpeningGameById(round.gameId);
+  const actions = round.actions;
+  let starter = "black";
+  let summary = "夜幕执子先手。";
+
+  switch (game?.resolveMode) {
+    case "speed-first":
+      starter = pickStarterByTime(actions, false);
+      summary = `${starter === "black" ? "夜幕执子" : "星辉执子"} 在“${game.title}”里手更快，拿到先手。`;
+      break;
+    case "speed-last":
+      starter = pickStarterByTime(actions, true);
+      summary = `${starter === "black" ? "夜幕执子" : "星辉执子"} 在“${game.title}”里谦让到最后，反而先手。`;
+      break;
+    case "roll-high": {
+      const blackRoll = actions.black?.roll || 1;
+      const whiteRoll = actions.white?.roll || 1;
+      starter = blackRoll === whiteRoll ? pickStarterByTime(actions, false) : blackRoll > whiteRoll ? "black" : "white";
+      summary = `骰子结果：黑 ${blackRoll}，白 ${whiteRoll}。${starter === "black" ? "夜幕执子" : "星辉执子"} 先手。`;
+      break;
+    }
+    case "roll-low": {
+      const blackRoll = actions.black?.roll || 6;
+      const whiteRoll = actions.white?.roll || 6;
+      starter = blackRoll === whiteRoll ? pickStarterByTime(actions, false) : blackRoll < whiteRoll ? "black" : "white";
+      summary = `反向骰子：黑 ${blackRoll}，白 ${whiteRoll}。${starter === "black" ? "夜幕执子" : "星辉执子"} 先手。`;
+      break;
+    }
+    case "coin": {
+      const coin = Math.random() < 0.5 ? "heads" : "tails";
+      const winners = ["black", "white"].filter((role) => actions[role]?.id === coin);
+      starter = winners.length === 1 ? winners[0] : pickStarterByTime(actions, false);
+      summary = `硬币翻到了${coin === "heads" ? "正面" : "反面"}。${starter === "black" ? "夜幕执子" : "星辉执子"} 先手。`;
+      break;
+    }
+    case "parity": {
+      const number = 1 + Math.floor(Math.random() * 9);
+      const parity = number % 2 === 0 ? "even" : "odd";
+      const winners = ["black", "white"].filter((role) => actions[role]?.id === parity);
+      starter = winners.length === 1 ? winners[0] : pickStarterByTime(actions, false);
+      summary = `神秘数字是 ${number}。${starter === "black" ? "夜幕执子" : "星辉执子"} 猜得更准，先手。`;
+      break;
+    }
+    case "door": {
+      const luckyDoor = ["left", "middle", "right"][Math.floor(Math.random() * 3)];
+      const winners = ["black", "white"].filter((role) => actions[role]?.id === luckyDoor);
+      const doorText = { left: "左门", middle: "中门", right: "右门" }[luckyDoor];
+      starter = winners.length === 1 ? winners[0] : pickStarterByTime(actions, false);
+      summary = `幸运门是${doorText}。${starter === "black" ? "夜幕执子" : "星辉执子"} 先手。`;
+      break;
+    }
+    case "rps": {
+      const winner = resolveRpsWinner(actions.black?.id, actions.white?.id);
+      starter = winner || pickStarterByTime(actions, false);
+      summary = winner
+        ? `${starter === "black" ? "夜幕执子" : "星辉执子"} 猜拳获胜，先手。`
+        : `双方猜拳平手，按出手速度判定：${starter === "black" ? "夜幕执子" : "星辉执子"} 先手。`;
+      break;
+    }
+    case "mood": {
+      const mood = Math.random() < 0.5 ? "work" : "slack";
+      const winners = ["black", "white"].filter((role) => actions[role]?.id === mood);
+      starter = winners.length === 1 ? winners[0] : pickStarterByTime(actions, false);
+      summary = `老板今天偏爱“${mood === "work" ? "开工" : "摸鱼"}”。${starter === "black" ? "夜幕执子" : "星辉执子"} 猜中先手。`;
+      break;
+    }
+    default:
+      starter = "black";
+  }
+
+  return { starter, summary };
+}
+
+function emitOpeningGameStart(code, room, targetRole = null) {
+  if (!room.openingGame) {
+    return;
+  }
+
+  const game = getOpeningGameById(room.openingGame.gameId);
+  if (!game) {
+    return;
+  }
+
+  const emitPayload = (socketId, role) => {
+    if (!socketId) {
+      return;
+    }
+    io.to(socketId).emit("opening-game-start", {
+      roundId: room.openingGame.roundId,
+      game,
+      submitted: Boolean(room.openingGame.actions[role])
+    });
+  };
+
+  if (targetRole === "black" || targetRole === "white") {
+    emitPayload(getSocketIdByRole(room, targetRole), targetRole);
+    return;
+  }
+
+  emitPayload(room.black, "black");
+  emitPayload(room.white, "white");
+}
+
 function getSocketIdByRole(room, role) {
   return role === "black" ? room.black : room.white;
 }
@@ -239,8 +491,10 @@ function tryRestoreRoom(socket) {
       started: room.started,
       reconnectToken
     });
-    if (room.started && room.white) {
+    if (room.started && room.roundReady && room.white) {
       io.to(room.white).emit("request-state-sync", { targetRole: "black" });
+    } else if (room.started && room.openingGame) {
+      emitOpeningGameStart(code, room, "black");
     }
     return true;
   }
@@ -255,8 +509,10 @@ function tryRestoreRoom(socket) {
       started: room.started,
       reconnectToken
     });
-    if (room.started && room.black) {
+    if (room.started && room.roundReady && room.black) {
       io.to(room.black).emit("request-state-sync", { targetRole: "white" });
+    } else if (room.started && room.openingGame) {
+      emitOpeningGameStart(code, room, "white");
     }
     return true;
   }
@@ -323,7 +579,9 @@ io.on("connection", (socket) => {
       blackDisconnectTimer: null,
       whiteDisconnectTimer: null,
       started: false,
-      pendingUndo: null
+      roundReady: false,
+      pendingUndo: null,
+      openingGame: null
     });
     bindSocketToRoom(socket, code, "black");
     console.log(`[room] ${code} created by ${socket.id}`);
@@ -348,13 +606,16 @@ io.on("connection", (socket) => {
     room.white = socket.id;
     room.whiteToken = generateReconnectToken();
     room.started = true;
+    room.roundReady = false;
     room.pendingUndo = null;
+    room.openingGame = createOpeningGameRound();
     bindSocketToRoom(socket, code, "white");
     console.log(`[room] ${code} joined by ${socket.id}`);
 
     io.to(room.black).emit("opponent-joined", { color: "black", code });
     io.to(room.black).emit("game-started", { color: "black", code });
     io.to(room.white).emit("game-started", { color: "white", code });
+    emitOpeningGameStart(code, room);
 
     if (typeof callback === "function") {
       callback({
@@ -368,7 +629,7 @@ io.on("connection", (socket) => {
 
   socket.on("place-stone", (data) => {
     const found = getRoomBySocket(socket);
-    if (!found || !found.room.started) return;
+    if (!found || !found.room.started || !found.room.roundReady) return;
     const player = socket.id === found.room.black ? "black" : "white";
     const mutated = Math.random() < 0.1;
     const placedColor = mutated ? getOpponentRole(player) : player;
@@ -384,7 +645,7 @@ io.on("connection", (socket) => {
 
   socket.on("use-skill", (data) => {
     const found = getRoomBySocket(socket);
-    if (!found || !found.room.started) return;
+    if (!found || !found.room.started || !found.room.roundReady) return;
 
     io.to(found.code).emit("skill-used", {
       skillId: data.skillId,
@@ -397,7 +658,7 @@ io.on("connection", (socket) => {
 
   socket.on("skip-skill", () => {
     const found = getRoomBySocket(socket);
-    if (!found || !found.room.started) return;
+    if (!found || !found.room.started || !found.room.roundReady) return;
 
     io.to(found.code).emit("skill-skipped", {
       player: socket.id === found.room.black ? "black" : "white"
@@ -409,12 +670,35 @@ io.on("connection", (socket) => {
     if (!found || !found.room.started) return;
 
     found.room.pendingUndo = null;
+    found.room.roundReady = false;
+    found.room.openingGame = createOpeningGameRound();
     io.to(found.code).emit("new-game-sync");
+    emitOpeningGameStart(found.code, found.room);
+  });
+
+  socket.on("opening-game-action", (data) => {
+    const found = getRoomBySocket(socket);
+    if (!found || !found.room.started || !found.room.openingGame) return;
+
+    const role = getSocketRoleInRoom(socket, found.room);
+    const round = found.room.openingGame;
+    const game = getOpeningGameById(round.gameId);
+    if (!role || !game || round.roundId !== data?.roundId || round.actions[role]) return;
+
+    round.actions[role] = createOpeningActionRecord(game, String(data?.actionId || ""));
+    if (!round.actions.black || !round.actions.white) {
+      return;
+    }
+
+    const result = resolveOpeningGameResult(round);
+    found.room.roundReady = true;
+    found.room.openingGame = null;
+    io.to(found.code).emit("opening-game-result", result);
   });
 
   socket.on("undo-request", (data) => {
     const found = getRoomBySocket(socket);
-    if (!found || !found.room.started || !data?.sessionState) return;
+    if (!found || !found.room.started || !found.room.roundReady || !data?.sessionState) return;
 
     const requesterRole = getSocketRoleInRoom(socket, found.room);
     const opponentRole = getOpponentRole(requesterRole);

@@ -126,6 +126,7 @@ const SKILLS = {
 };
 
 const PHASE_LABELS = {
+  opening: "决定先手",
   placing: "落子中",
   skillSelect: "选择技能",
   targeting: "锁定目标",
@@ -164,6 +165,97 @@ const COUNTRYSIDE_MORPH_SKILL = {
   name: "城乡变形记",
   description: "下子时有 10% 概率突然变成对方颜色，整活全场可见。"
 };
+const OPENING_GAMES = [
+  {
+    id: "fast-click",
+    title: "手速碰瓷赛",
+    description: "谁先拍下“我先来”，谁就拿到先手。主打一个手快有、手慢无。",
+    buttons: [{ id: "tap", label: "我先来" }],
+    resolveMode: "speed-first",
+    offlineReady: false
+  },
+  {
+    id: "slow-click",
+    title: "谦让杯",
+    description: "谁最后按下“您先请”，谁反而先手。礼貌到极致就是偷跑。",
+    buttons: [{ id: "wait", label: "您先请" }],
+    resolveMode: "speed-last",
+    offlineReady: false
+  },
+  {
+    id: "dice-high",
+    title: "骰子莽夫局",
+    description: "一键掷骰，点数大的先走。运气这件事，先吹再说。",
+    buttons: [{ id: "roll", label: "掷骰子" }],
+    resolveMode: "roll-high",
+    offlineReady: true
+  },
+  {
+    id: "dice-low",
+    title: "反向欧皇局",
+    description: "谁摇得更小谁先手。今天不拼上限，专拼低保。",
+    buttons: [{ id: "roll", label: "反向掷骰" }],
+    resolveMode: "roll-low",
+    offlineReady: true
+  },
+  {
+    id: "coin",
+    title: "硬币甩锅术",
+    description: "猜正反面。猜中者先手；都猜中或都猜错，就看谁下手更快。",
+    buttons: [
+      { id: "heads", label: "正面" },
+      { id: "tails", label: "反面" }
+    ],
+    resolveMode: "coin",
+    offlineReady: true
+  },
+  {
+    id: "parity",
+    title: "单还是双",
+    description: "系统摇一个神秘数字，猜中单双的人先手。没猜中也别装懂王。",
+    buttons: [
+      { id: "odd", label: "单数" },
+      { id: "even", label: "双数" }
+    ],
+    resolveMode: "parity",
+    offlineReady: true
+  },
+  {
+    id: "door",
+    title: "土味幸运门",
+    description: "三扇门里藏着先手权。点一扇，开错了就当节目效果。",
+    buttons: [
+      { id: "left", label: "踹左门" },
+      { id: "middle", label: "踹中门" },
+      { id: "right", label: "踹右门" }
+    ],
+    resolveMode: "door",
+    offlineReady: true
+  },
+  {
+    id: "rps",
+    title: "塑料猜拳王",
+    description: "石头剪刀布，一把定先手。赢了叫谋略，输了叫网络延迟。",
+    buttons: [
+      { id: "rock", label: "石头" },
+      { id: "paper", label: "布" },
+      { id: "scissors", label: "剪刀" }
+    ],
+    resolveMode: "rps",
+    offlineReady: true
+  },
+  {
+    id: "mood",
+    title: "老板心情测试",
+    description: "猜老板今天更想看你“开工”还是“摸鱼”。猜中就先手，猜错先挨骂。",
+    buttons: [
+      { id: "work", label: "开工" },
+      { id: "slack", label: "摸鱼" }
+    ],
+    resolveMode: "mood",
+    offlineReady: true
+  }
+];
 
 const awakeningProgress = {
   black: {
@@ -286,6 +378,11 @@ const dom = {
   noticeTitle: document.querySelector("#notice-title"),
   noticeText: document.querySelector("#notice-text"),
   noticeConfirm: document.querySelector("#notice-confirm"),
+  openingGameModal: document.querySelector("#opening-game-modal"),
+  openingGameTitle: document.querySelector("#opening-game-title"),
+  openingGameDesc: document.querySelector("#opening-game-desc"),
+  openingGameButtons: document.querySelector("#opening-game-buttons"),
+  openingGameStatus: document.querySelector("#opening-game-status"),
   undoModal: document.querySelector("#undo-modal"),
   undoText: document.querySelector("#undo-text"),
   undoApprove: document.querySelector("#undo-approve"),
@@ -321,7 +418,7 @@ function createInitialState(mode = "local-pvp") {
     match: {
       currentPlayer: "black",
       turn: 1,
-      status: "playing",
+      status: "opening",
       winner: null,
       mode
     },
@@ -359,6 +456,18 @@ function createInitialState(mode = "local-pvp") {
         pendingIncoming: false
       }
     },
+    opening: {
+      active: true,
+      roundId: null,
+      game: null,
+      submitted: false,
+      currentPicker: "black",
+      localActions: {
+        black: null,
+        white: null
+      },
+      resultText: ""
+    },
     hidden: {
       loseStreak,
       ghostWall: {
@@ -391,6 +500,7 @@ function cloneStateSnapshot() {
     board: structuredClone(state.board),
     match: structuredClone(state.match),
     skill: structuredClone(state.skill),
+    opening: structuredClone(state.opening),
     hidden: structuredClone(state.hidden),
     ui: {
       message: state.ui.message,
@@ -416,6 +526,7 @@ function restoreSnapshot(snapshot) {
     board: snapshot.board,
     match: snapshot.match,
     skill: snapshot.skill,
+    opening: snapshot.opening,
     hidden: snapshot.hidden,
     ui: {
       message: snapshot.ui.message,
@@ -443,6 +554,7 @@ function buildOnlineSessionState() {
     board: structuredClone(state.board),
     match: structuredClone(state.match),
     skill: structuredClone(state.skill),
+    opening: structuredClone(state.opening),
     hidden: structuredClone(state.hidden),
     progress: structuredClone(awakeningProgress),
     ui: {
@@ -475,6 +587,17 @@ function applyOnlineSessionState(sessionState) {
       mode: "online"
     },
     skill: structuredClone(sessionState.skill),
+    opening: structuredClone(
+      sessionState.opening || {
+        active: false,
+        roundId: null,
+        game: null,
+        submitted: false,
+        currentPicker: "black",
+        localActions: { black: null, white: null },
+        resultText: ""
+      }
+    ),
     hidden: structuredClone(sessionState.hidden),
     ui: {
       message: sessionState.ui.message,
@@ -561,6 +684,364 @@ function hideNoticeModal() {
   dom.noticeModal.setAttribute("aria-hidden", "true");
 }
 
+function getOpeningGamePool() {
+  if (state.online.enabled) {
+    return OPENING_GAMES;
+  }
+
+  return OPENING_GAMES.filter((game) => game.offlineReady);
+}
+
+function cloneOpeningGame(game) {
+  return game ? structuredClone(game) : null;
+}
+
+function getOpeningGameById(id) {
+  return cloneOpeningGame(OPENING_GAMES.find((game) => game.id === id));
+}
+
+function pickOpeningGame() {
+  const pool = getOpeningGamePool();
+  return cloneOpeningGame(pool[Math.floor(Math.random() * pool.length)]);
+}
+
+function getOpeningPickerLabel(player) {
+  if (state.ai.enabled && player === "white") {
+    return "AI";
+  }
+
+  if (state.online.enabled) {
+    return player === state.online.myColor ? "你" : "对手";
+  }
+
+  return PLAYER_LABELS[player];
+}
+
+function getOpeningStatusText() {
+  if (!state.opening?.active) {
+    return "";
+  }
+
+  if (state.opening.resultText) {
+    return state.opening.resultText;
+  }
+
+  if (state.online.enabled) {
+    return state.opening.submitted
+      ? "你的答案已提交，正在等对手出招。"
+      : "选一个按钮，双方各做一步后就决定谁先手。";
+  }
+
+  if (state.ai.enabled && state.opening.currentPicker === "white") {
+    return "AI 正在悄悄做决定，看看这局是谁先手。";
+  }
+
+  if (!state.ai.enabled && state.opening.currentPicker === "white") {
+    return "现在轮到白方做这一步小游戏。";
+  }
+
+  return `${getOpeningPickerLabel(state.opening.currentPicker)} 正在决定开局先手。`;
+}
+
+function createOpeningActionRecord(game, actionId) {
+  const record = {
+    id: actionId,
+    submittedAt: performance.now()
+  };
+
+  if (game.resolveMode === "roll-high" || game.resolveMode === "roll-low") {
+    record.roll = 1 + Math.floor(Math.random() * 6);
+  }
+
+  return record;
+}
+
+function pickStarterByTime(actions, preferLatest = false) {
+  const blackAction = actions.black;
+  const whiteAction = actions.white;
+
+  if (!blackAction && !whiteAction) {
+    return "black";
+  }
+
+  if (!whiteAction) {
+    return "black";
+  }
+
+  if (!blackAction) {
+    return "white";
+  }
+
+  if (blackAction.submittedAt === whiteAction.submittedAt) {
+    return Math.random() < 0.5 ? "black" : "white";
+  }
+
+  if (preferLatest) {
+    return blackAction.submittedAt > whiteAction.submittedAt ? "black" : "white";
+  }
+
+  return blackAction.submittedAt < whiteAction.submittedAt ? "black" : "white";
+}
+
+function resolveRpsWinner(blackPick, whitePick) {
+  if (blackPick === whitePick) {
+    return null;
+  }
+
+  const winningMap = {
+    rock: "scissors",
+    paper: "rock",
+    scissors: "paper"
+  };
+
+  return winningMap[blackPick] === whitePick ? "black" : "white";
+}
+
+function resolveOpeningGameOutcome(game, actions) {
+  let starter = "black";
+  let summary = "开局小游戏完成，夜幕执子先手。";
+
+  switch (game.resolveMode) {
+    case "speed-first":
+      starter = pickStarterByTime(actions, false);
+      summary = `${PLAYER_LABELS[starter]} 在“${game.title}”里手更快，拿到先手。`;
+      break;
+    case "speed-last":
+      starter = pickStarterByTime(actions, true);
+      summary = `${PLAYER_LABELS[starter]} 在“${game.title}”里谦让到最后，反而先手。`;
+      break;
+    case "roll-high": {
+      const blackRoll = actions.black?.roll || 1;
+      const whiteRoll = actions.white?.roll || 1;
+      starter = blackRoll === whiteRoll ? pickStarterByTime(actions, false) : blackRoll > whiteRoll ? "black" : "white";
+      summary = `骰子结果：黑 ${blackRoll}，白 ${whiteRoll}。${PLAYER_LABELS[starter]} 点数更${blackRoll === whiteRoll ? "巧" : "大"}，先手。`;
+      break;
+    }
+    case "roll-low": {
+      const blackRoll = actions.black?.roll || 6;
+      const whiteRoll = actions.white?.roll || 6;
+      starter = blackRoll === whiteRoll ? pickStarterByTime(actions, false) : blackRoll < whiteRoll ? "black" : "white";
+      summary = `反向骰子：黑 ${blackRoll}，白 ${whiteRoll}。${PLAYER_LABELS[starter]} 数字更小，先手。`;
+      break;
+    }
+    case "coin": {
+      const coin = Math.random() < 0.5 ? "heads" : "tails";
+      const winners = ["black", "white"].filter((player) => actions[player]?.id === coin);
+      starter = winners.length === 1 ? winners[0] : pickStarterByTime(actions, false);
+      summary = `硬币翻到了${coin === "heads" ? "正面" : "反面"}。${PLAYER_LABELS[starter]} 拿到先手。`;
+      break;
+    }
+    case "parity": {
+      const number = 1 + Math.floor(Math.random() * 9);
+      const parity = number % 2 === 0 ? "even" : "odd";
+      const winners = ["black", "white"].filter((player) => actions[player]?.id === parity);
+      starter = winners.length === 1 ? winners[0] : pickStarterByTime(actions, false);
+      summary = `神秘数字是 ${number}（${parity === "odd" ? "单数" : "双数"}）。${PLAYER_LABELS[starter]} 先手。`;
+      break;
+    }
+    case "door": {
+      const luckyDoor = ["left", "middle", "right"][Math.floor(Math.random() * 3)];
+      const winners = ["black", "white"].filter((player) => actions[player]?.id === luckyDoor);
+      const doorText = { left: "左门", middle: "中门", right: "右门" }[luckyDoor];
+      starter = winners.length === 1 ? winners[0] : pickStarterByTime(actions, false);
+      summary = `幸运门是${doorText}。${PLAYER_LABELS[starter]} 先手，另一位先别踹门了。`;
+      break;
+    }
+    case "rps": {
+      const rpsWinner = resolveRpsWinner(actions.black?.id, actions.white?.id);
+      starter = rpsWinner || pickStarterByTime(actions, false);
+      summary = rpsWinner
+        ? `${PLAYER_LABELS[starter]} 猜拳获胜，抢到先手。`
+        : `双方猜拳平手，按出手速度判定：${PLAYER_LABELS[starter]} 先手。`;
+      break;
+    }
+    case "mood": {
+      const bossMood = Math.random() < 0.5 ? "work" : "slack";
+      const winners = ["black", "white"].filter((player) => actions[player]?.id === bossMood);
+      starter = winners.length === 1 ? winners[0] : pickStarterByTime(actions, false);
+      summary = `老板今天偏爱“${bossMood === "work" ? "开工" : "摸鱼"}”。${PLAYER_LABELS[starter]} 猜中，先手。`;
+      break;
+    }
+    default:
+      starter = "black";
+      summary = `${PLAYER_LABELS.black} 先手。`;
+  }
+
+  return { starter, summary };
+}
+
+function finalizeOpeningGame(result) {
+  state.opening.resultText = result.summary;
+  renderAll();
+
+  window.setTimeout(() => {
+    if (!state.opening?.active) {
+      return;
+    }
+
+    state.opening.active = false;
+    state.opening.resultText = "";
+    state.opening.submitted = false;
+    state.opening.game = null;
+    state.match.status = "playing";
+    state.match.currentPlayer = result.starter;
+
+    pushLog(result.summary);
+    showBoardToast(result.summary, 2200);
+    setMessage(
+      result.starter === "black"
+        ? "本局由夜幕执子先行。抢中心，争取先点亮技能。"
+        : "本局由星辉执子先行。先手已定，准备开战。"
+    );
+    renderAll();
+  }, 900);
+}
+
+function startOpeningGame(game, options = {}) {
+  state.match.status = "opening";
+  state.skill.pendingTrigger = null;
+  state.skill.selectedSkill = null;
+  state.skill.warpSource = null;
+  state.opening = {
+    active: true,
+    roundId: options.roundId || `${Date.now()}`,
+    game: cloneOpeningGame(game),
+    submitted: Boolean(options.submitted),
+    currentPicker: "black",
+    localActions: {
+      black: null,
+      white: null
+    },
+    resultText: ""
+  };
+  clearHoverCell();
+  if (game) {
+    pushLog(`本局开场小游戏：${game.title}。`);
+  }
+  setMessage(game ? `本局开场小游戏：${game.title}` : "正在准备开场小游戏...");
+  renderAll();
+}
+
+function startOfflineOpeningGame() {
+  startOpeningGame(pickOpeningGame());
+}
+
+function resolveOfflineOpeningGameIfReady() {
+  const actions = state.opening?.localActions;
+  if (!actions?.black || !actions?.white || !state.opening.game) {
+    return;
+  }
+
+  finalizeOpeningGame(resolveOpeningGameOutcome(state.opening.game, actions));
+}
+
+function runAIOpeningGameAction() {
+  if (!state.ai.enabled || !state.opening?.active || state.match.status !== "opening") {
+    return;
+  }
+
+  window.setTimeout(() => {
+    if (!state.opening?.active || state.match.status !== "opening") {
+      return;
+    }
+
+    const game = state.opening.game;
+    if (!game) {
+      return;
+    }
+
+    const randomButton = game.buttons[Math.floor(Math.random() * game.buttons.length)];
+    state.opening.localActions.white = createOpeningActionRecord(game, randomButton.id);
+    state.opening.currentPicker = "black";
+    resolveOfflineOpeningGameIfReady();
+  }, 560 + Math.floor(Math.random() * 400));
+}
+
+function submitOpeningGameAction(actionId) {
+  if (!state.opening?.active || !state.opening.game || state.opening.resultText) {
+    return;
+  }
+
+  if (state.online.enabled) {
+    if (state.opening.submitted) {
+      return;
+    }
+    state.opening.submitted = true;
+    setMessage("你的开场小游戏答案已提交，等待对手。");
+    renderAll();
+    if (onlineSocket) {
+      onlineSocket.emit("opening-game-action", {
+        roundId: state.opening.roundId,
+        actionId
+      });
+    }
+    return;
+  }
+
+  const currentPicker = state.opening.currentPicker;
+  state.opening.localActions[currentPicker] = createOpeningActionRecord(state.opening.game, actionId);
+
+  if (state.ai.enabled && currentPicker === "black") {
+    state.opening.currentPicker = "white";
+    setMessage("你已完成开场小游戏，AI 正在偷偷决定先手。");
+    renderAll();
+    runAIOpeningGameAction();
+    return;
+  }
+
+  if (!state.ai.enabled && currentPicker === "black") {
+    state.opening.currentPicker = "white";
+    setMessage("轮到星辉执子完成这一步小游戏。");
+    renderAll();
+    return;
+  }
+
+  resolveOfflineOpeningGameIfReady();
+}
+
+function renderOpeningGameModal() {
+  if (
+    !dom.openingGameModal ||
+    !dom.openingGameTitle ||
+    !dom.openingGameDesc ||
+    !dom.openingGameButtons ||
+    !dom.openingGameStatus
+  ) {
+    return;
+  }
+
+  const visible = Boolean(state.opening?.active && state.opening?.game);
+  dom.openingGameModal.classList.toggle("hidden", !visible);
+  dom.openingGameModal.setAttribute("aria-hidden", String(!visible));
+
+  if (!visible) {
+    dom.openingGameButtons.innerHTML = "";
+    dom.openingGameStatus.textContent = "";
+    return;
+  }
+
+  const game = state.opening.game;
+  dom.openingGameTitle.textContent = game.title;
+  dom.openingGameDesc.textContent = game.description;
+  dom.openingGameStatus.textContent = getOpeningStatusText();
+  dom.openingGameButtons.innerHTML = "";
+
+  if (state.opening.resultText) {
+    return;
+  }
+
+  game.buttons.forEach((buttonDef) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = buttonDef.label;
+    button.disabled =
+      (state.online.enabled && state.opening.submitted) ||
+      (state.ai.enabled && state.opening.currentPicker === "white");
+    button.addEventListener("click", () => submitOpeningGameAction(buttonDef.id));
+    dom.openingGameButtons.appendChild(button);
+  });
+}
+
 function renderBoardToast() {
   if (!dom.boardToast) {
     return;
@@ -619,6 +1100,9 @@ function maybeShowFirstSkillLimitNotice(player) {
   }
 
   limitState.firstNoticeShown = true;
+  if (!isOwnPerspective(player)) {
+    return;
+  }
   showNoticeModal(
     "灵技冷却提醒",
     "提示：同一方不能连续两步都释放技能。你这一步已经用过技能，下次轮到你时即使触发技能，也必须先空过一次。"
@@ -683,6 +1167,10 @@ function getPhaseLabel() {
 }
 
 function getPhaseKey() {
+  if (state.match.status === "opening") {
+    return "opening";
+  }
+
   if (state.match.status === "finished") {
     return "gameover";
   }
@@ -746,7 +1234,7 @@ function renderStatus() {
       : "本地练习";
   }
 
-  let turnText = `第 ${state.match.turn} 手`;
+  let turnText = state.match.status === "opening" ? "开局小游戏中" : `第 ${state.match.turn} 手`;
   if (state.online.enabled && state.match.status === "playing") {
     turnText += state.match.currentPlayer === state.online.myColor
       ? " · 你的回合" : " · 对手回合";
@@ -756,10 +1244,14 @@ function renderStatus() {
   }
   dom.turnLabel.textContent = turnText;
   dom.phaseLabel.textContent = getPhaseLabel();
-  document.body.dataset.turn = state.match.currentPlayer;
+  document.body.dataset.turn = state.match.currentPlayer || "black";
   document.body.dataset.phase = phaseKey;
 
-  if (state.match.status === "finished") {
+  if (state.match.status === "opening") {
+    dom.triggerLabel.textContent = state.opening?.game
+      ? `小游戏：${state.opening.game.title}`
+      : "先手待定";
+  } else if (state.match.status === "finished") {
     dom.triggerLabel.textContent = `${PLAYER_LABELS[state.match.winner]} 完成终局`;
   } else if (state.skill.pendingTrigger) {
     const spark = state.skill.pendingTrigger.tier === "small" ? "3 连小技能" : "4 连大技能";
@@ -768,10 +1260,16 @@ function renderStatus() {
     dom.triggerLabel.textContent = getGhostWallStatusText() || "等待连段触发";
   }
 
-  dom.blackBadge.classList.toggle("active", state.match.currentPlayer === "black");
-  dom.whiteBadge.classList.toggle("active", state.match.currentPlayer === "white");
+  dom.blackBadge.classList.toggle(
+    "active",
+    state.match.status !== "opening" && state.match.currentPlayer === "black"
+  );
+  dom.whiteBadge.classList.toggle(
+    "active",
+    state.match.status !== "opening" && state.match.currentPlayer === "white"
+  );
   dom.message.textContent = state.ui.message;
-  dom.undoMove.disabled = state.history.length === 0 || hasPendingUndoRequest();
+  dom.undoMove.disabled = state.match.status !== "playing" || state.history.length === 0 || hasPendingUndoRequest();
   dom.skipSkill.disabled = !state.skill.pendingTrigger;
   if (dom.chatInput) {
     dom.chatInput.disabled = !state.online.enabled;
@@ -779,21 +1277,25 @@ function renderStatus() {
   if (dom.chatSend) {
     dom.chatSend.disabled = !state.online.enabled;
   }
-  dom.modeLocal.classList.toggle("active", !state.ai.enabled);
-  dom.modeAi.classList.toggle("active", state.ai.enabled);
+  dom.modeLocal.classList.toggle("active", !state.ai.enabled && !state.online.enabled);
+  dom.modeAi.classList.toggle("active", state.ai.enabled && !state.online.enabled);
+  dom.modeLocal.disabled = state.online.enabled;
+  dom.modeAi.disabled = state.online.enabled;
 
   if (dom.aiDifficultyRow) {
-    dom.aiDifficultyRow.hidden = !state.ai.enabled;
+    dom.aiDifficultyRow.hidden = !state.ai.enabled || state.online.enabled;
   }
 
   if (dom.aiEngineRow) {
     const hasDefaultProxy = Boolean(getDefaultProxyUrl());
-    dom.aiEngineRow.hidden = !state.ai.enabled || hasDefaultProxy;
+    dom.aiEngineRow.hidden = !state.ai.enabled || hasDefaultProxy || state.online.enabled;
   }
 
   if (dom.engineLocal && dom.engineProxy) {
     dom.engineLocal.classList.toggle("active", state.ai.engine !== "proxy");
     dom.engineProxy.classList.toggle("active", state.ai.engine === "proxy");
+    dom.engineLocal.disabled = state.online.enabled;
+    dom.engineProxy.disabled = state.online.enabled;
   }
 
   if (dom.aiProxyPanel) {
@@ -807,7 +1309,7 @@ function renderStatus() {
   dom.difficultyButtons.forEach((btn) => {
     const level = btn.dataset.difficulty;
     btn.classList.toggle("active", level === difficultyKey);
-    btn.disabled = !state.ai.enabled;
+    btn.disabled = !state.ai.enabled || state.online.enabled;
   });
 
   if (dom.aiDifficultyLabel) {
@@ -839,13 +1341,23 @@ function renderSkills() {
   const options = getSkillOptions();
 
   if (!options.length) {
-    dom.skillHint.textContent = "未触发";
-    dom.skillList.innerHTML = `
-      <button class="skill-button" type="button" disabled>
-        等待连段触发
-        <small>先落子形成 3 连或 4 连，再从这里选择本回合技能。</small>
-      </button>
-    `;
+    if (state.match.status === "opening") {
+      dom.skillHint.textContent = "等待开局";
+      dom.skillList.innerHTML = `
+        <button class="skill-button" type="button" disabled>
+          先完成开局小游戏
+          <small>本局先手还没决定。小游戏结束后，才能通过 3 连或 4 连触发技能。</small>
+        </button>
+      `;
+    } else {
+      dom.skillHint.textContent = "未触发";
+      dom.skillList.innerHTML = `
+        <button class="skill-button" type="button" disabled>
+          等待连段触发
+          <small>先落子形成 3 连或 4 连，再从这里选择本回合技能。</small>
+        </button>
+      `;
+    }
     return;
   }
 
@@ -1109,8 +1621,14 @@ function renderBoard() {
   );
   const fragment = document.createDocumentFragment();
 
-  dom.board.classList.toggle("preview-black", state.match.currentPlayer === "black");
-  dom.board.classList.toggle("preview-white", state.match.currentPlayer === "white");
+  dom.board.classList.toggle(
+    "preview-black",
+    state.match.status === "playing" && state.match.currentPlayer === "black"
+  );
+  dom.board.classList.toggle(
+    "preview-white",
+    state.match.status === "playing" && state.match.currentPlayer === "white"
+  );
   dom.board.classList.toggle("skill-targeting", Boolean(state.skill.selectedSkill));
   dom.board.classList.toggle("trigger-active", Boolean(state.skill.pendingTrigger));
 
@@ -1220,6 +1738,7 @@ function renderAll() {
   renderChat();
   renderBoard();
   renderBoardToast();
+  renderOpeningGameModal();
   renderWinnerModal();
   renderUndoModal();
   maybeRunAI();
@@ -1481,7 +2000,7 @@ async function fetchMoveFromProxy() {
 }
 
 function maybeRunAI() {
-  if (!state.ai.enabled || state.match.status === "finished") {
+  if (!state.ai.enabled || state.match.status !== "playing") {
     return;
   }
 
@@ -1655,14 +2174,22 @@ function maybeTriggerGhostWall(attacker, result, row, col) {
   state.skill.warpSource = null;
   ghostState.used = true;
 
-  if (isOwnPerspective(defender)) {
+  if (isOwnPerspective(attacker)) {
+    showNoticeModal(
+      "鬼打墙发动",
+      `你刚下在 (${victimRow + 1}, ${victimCol + 1}) 的关键棋子，被对方的“${GHOST_WALL_SKILL.name}”悄悄偷走了。`
+    );
+    showBoardToast("你的关键棋子被鬼打墙偷走了。", 2400);
+    setMessage("棋盘忽起迷障，你刚落下的关键棋子被偷走了。");
+    pushLog("你的关键棋子被对手的隐藏技能“鬼打墙”偷走。");
+  } else if (isOwnPerspective(defender)) {
     setMessage(`鬼打墙已觉醒：${PLAYER_LABELS[defender]} 在暗影中偷走了一枚关键敌子。`);
     pushLog(`${PLAYER_LABELS[defender]} 的隐藏技能“${GHOST_WALL_SKILL.name}”悄然发动，化解了致命威胁。`);
   } else {
     setMessage("棋盘忽起迷障，一枚关键棋子悄然消失了。");
     pushLog("棋局异动化解了一次致命威胁。");
   }
-  queueEffect([[victimRow, victimCol]], "convert", 700);
+  queueEffect([[victimRow, victimCol]], "ghost-wall", 1100);
   return true;
 }
 
@@ -1737,7 +2264,7 @@ function advanceTurn() {
 }
 
 function placeStone(row, col, options = {}) {
-  if (state.match.status === "finished") {
+  if (state.match.status !== "playing") {
     return;
   }
 
@@ -1801,9 +2328,15 @@ function placeStone(row, col, options = {}) {
   if (result.outcome === "trigger" && placedColor === currentPlayer) {
     if (isSkillReleaseLocked(currentPlayer)) {
       noteTurnSkillUsage(currentPlayer, false);
-      setMessage("灵技冷却中：你上一回合已经释放过技能，本回合不能连续释放。");
+      setMessage(
+        isOwnPerspective(currentPlayer)
+          ? "灵技冷却中：你上一回合已经释放过技能，本回合不能连续释放。"
+          : "对手这一手触发了技能窗口，但因为冷却限制被自动跳过。"
+      );
       pushLog(`${PLAYER_LABELS[currentPlayer]} 触发了技能窗口，但因连续施法限制被强制跳过。`);
-      showBoardToast("灵技冷却中，本回合不能连续放技能。", 2400);
+      if (isOwnPerspective(currentPlayer)) {
+        showBoardToast("灵技冷却中，本回合不能连续放技能。", 2400);
+      }
       advanceTurn();
       renderAll();
       return;
@@ -2042,6 +2575,12 @@ function handleBoardClick(row, col) {
     return;
   }
 
+  if (state.match.status === "opening") {
+    setMessage("请先完成开局小游戏，先手定下来后才能落子。");
+    renderStatus();
+    return;
+  }
+
   if (hasPendingUndoRequest()) {
     setMessage(
       state.online.undoRequest?.pendingMine
@@ -2095,7 +2634,7 @@ function handleBoardClick(row, col) {
 }
 
 function handleCellHover(row, col) {
-  if (state.match.status === "finished") {
+  if (state.match.status === "finished" || state.match.status === "opening") {
     return;
   }
 
@@ -2190,6 +2729,10 @@ function doResetGame() {
     setMessage("新一局开始：棋局暗流涌动，小心看不见的变数。");
   }
   SFX.newGame();
+  if (!state.online.enabled) {
+    startOfflineOpeningGame();
+    return;
+  }
   renderAll();
 }
 
@@ -2315,9 +2858,9 @@ function setMode(mode) {
   ];
   state.ui.message =
     mode === "ai"
-      ? "AI 模式已启用。你先执黑子，白子会在短暂思考后自动落子。"
-      : "已切回本地双人模式，双方都由你手动操作。";
-  renderAll();
+      ? "AI 模式已启用。每局会先做一个小游戏，再决定由谁开局。"
+      : "已切回本地双人模式。每局开始前都会先做一个小游戏决定先手。";
+  startOfflineOpeningGame();
 }
 
 function setDifficulty(level) {
@@ -2457,16 +3000,16 @@ function dismissWelcome(mode) {
     state = createInitialState("ai");
     state.ai.engine = "proxy";
     state.ui.logs = ["AI 对战模式已启用，DeepSeek 代理已自动激活。你先执黑子。"];
-    state.ui.message = "你执黑子先行，AI 将在你落子后自动思考并应答。";
+    state.ui.message = "AI 对战模式已启用。先做一个开局小游戏，看看谁先手。";
   } else if (mode === "online") {
     return;
   } else {
     state = createInitialState("local-pvp");
     state.ui.logs = ["本地练习模式：两位玩家轮流在同一台电脑上落子。"];
-    state.ui.message = "练习模式已就绪——夜幕执子先行，争取做出 3 连来点亮技能面板。";
+    state.ui.message = "练习模式已就绪。先做一个开局小游戏，决定谁先开局。";
   }
 
-  renderAll();
+  startOfflineOpeningGame();
 }
 
 function startOnlineGame(color, roomCode) {
@@ -2491,9 +3034,7 @@ function startOnlineGame(color, roomCode) {
 
   const colorName = color === "black" ? "夜幕(黑)" : "星辉(白)";
   state.ui.logs = [`在线对战已开始！你是${colorName}，房间码 ${roomCode}。`];
-  state.ui.message = color === "black"
-    ? "你先行——落子开始对局。"
-    : "等待对手（黑方）先行...";
+  state.ui.message = "房间已就绪，正在抽取开局小游戏来决定谁先手。";
   renderAll();
 }
 
@@ -2752,6 +3293,27 @@ function bindOnlineSocketEvents(socket) {
     setRoomStatus("房间已就绪，正在进入对战...", true);
     SFX.newGame();
     startOnlineGame(data.color, data.code || onlineRoomCode);
+  });
+
+  socket.on("opening-game-start", (data) => {
+    const game = data?.game?.id ? data.game : getOpeningGameById(data?.gameId);
+    if (!game) {
+      return;
+    }
+    startOpeningGame(game, {
+      roundId: data.roundId,
+      submitted: Boolean(data.submitted)
+    });
+  });
+
+  socket.on("opening-game-result", (data) => {
+    if (!data?.starter) {
+      return;
+    }
+    finalizeOpeningGame({
+      starter: data.starter,
+      summary: data.summary || `${PLAYER_LABELS[data.starter]} 拿到先手。`
+    });
   });
 
   socket.on("session-restored", (data) => {
